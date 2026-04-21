@@ -7,12 +7,11 @@ services:
     env_file:
       - .env
     ports:
-      # Bind health port only to loopback by default. Override
-      # HEALTH_HOST_PORT in .env if another container owns the port
-      # (cadvisor, for example, claims 8080 on most monitoring hosts).
-      # Change the bind address to 0.0.0.0 or a LAN IP if you want
-      # Cato/other hosts to scrape /metrics.
-      - "127.0.0.1:${HEALTH_HOST_PORT:-8090}:8080"
+      # LAN-accessible by default so the web UI is reachable from
+      # workstations on the same network. Override HEALTH_BIND in .env
+      # with 127.0.0.1 if you want loopback-only. HEALTH_HOST_PORT
+      # defaults to 8090 because 8080 is commonly taken (cadvisor).
+      - "${HEALTH_BIND:-0.0.0.0}:${HEALTH_HOST_PORT:-8090}:8080"
     logging:
       driver: json-file
       options:

@@ -1,8 +1,21 @@
-"""Entry point for the AI traffic simulator daemon."""
+"""Entry point for the ai-spray daemon.
+
+Runs three concurrent tasks:
+
+1. ``_scheduler``     — the pacing loop that fires traffic at random
+   targets on the interval range in ``state.runtime_cfg`` (unless
+   paused).
+2. ``_manual_fire_worker`` — pulls names out of the fire queue and
+   executes them out-of-band of the scheduler. Runs even when the
+   scheduler is paused.
+3. ``run_web_server`` — the aiohttp UI + REST + SSE server.
+"""
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
 import logging
+import os
 import random
 import signal
 import sys
@@ -11,9 +24,10 @@ import httpx
 import structlog
 
 from .config import Config
-from .health import HealthState, run_health_server
 from .providers import Provider, ProviderResult
 from .registry import build_registry
+from .state import RunState
+from .web import run_web_server
 
 
 # ---------------------------------------------------------------------------
@@ -47,18 +61,44 @@ log = structlog.get_logger()
 
 
 # ---------------------------------------------------------------------------
-# Execution
+# Helpers
 # ---------------------------------------------------------------------------
+
+def _now_iso() -> str:
+    return (
+        _dt.datetime.now(_dt.timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
+
 
 async def _run_one(
     provider: Provider,
     client: httpx.AsyncClient,
-    state: HealthState,
+    state: RunState,
+    trigger: str = "scheduler",
 ) -> ProviderResult:
     result = await provider.execute(client)
-    state.record(result.category, result.name, result.ok)
+    state.health.record(result.category, result.name, result.ok, result.status_code)
+
+    event = {
+        "type": "traffic",
+        "timestamp": _now_iso(),
+        "trigger": trigger,
+        "target": result.name,
+        "category": result.category,
+        "method": result.method,
+        "url": result.url,
+        "status": result.status_code,
+        "ok": result.ok,
+        "error": result.error,
+        "snippet": result.response_snippet,
+    }
+
+    # Stdout JSON log for docker logs / journal / opensearch ingestion.
     log.info(
         "traffic",
+        trigger=trigger,
         target=result.name,
         category=result.category,
         method=result.method,
@@ -68,47 +108,78 @@ async def _run_one(
         error=result.error,
         snippet=result.response_snippet,
     )
+    # UI / SSE stream + ring buffer.
+    state.record_event(event)
     return result
 
 
+# ---------------------------------------------------------------------------
+# Scheduler (automatic pacing)
+# ---------------------------------------------------------------------------
+
 async def _scheduler(
-    cfg: Config,
-    providers: list[Provider],
+    state: RunState,
     client: httpx.AsyncClient,
-    state: HealthState,
     stop: asyncio.Event,
 ) -> None:
     rng = random.Random()
     log.info(
         "scheduler_started",
-        target_count=len(providers),
-        categories=sorted(cfg.categories),
-        min_interval=cfg.min_interval,
-        max_interval=cfg.max_interval,
-        burst_probability=cfg.burst_probability,
+        target_count=len(state.providers),
+        categories=sorted(state.enabled_categories),
     )
 
     while not stop.is_set():
-        # Decide: single shot or burst?
+        # Wait while paused. The running Event is set when running; we
+        # wake cheaply when the UI resumes us.
+        if state.paused:
+            try:
+                await asyncio.wait_for(state.running.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                continue
+
+        providers = state.enabled_providers()
+        if not providers:
+            # Nothing enabled; idle-poll for config changes.
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=3.0)
+            except asyncio.TimeoutError:
+                pass
+            continue
+
+        cfg = state.runtime_cfg
+
         if rng.random() < cfg.burst_probability:
             burst_size = rng.randint(cfg.burst_min_size, cfg.burst_max_size)
-            log.info("burst_start", size=burst_size)
+            state.record_event({
+                "type": "scheduler",
+                "timestamp": _now_iso(),
+                "event": "burst_start",
+                "size": burst_size,
+            })
             for _ in range(burst_size):
-                if stop.is_set():
+                if stop.is_set() or state.paused:
                     break
-                provider = rng.choice(providers)
-                await _run_one(provider, client, state)
+                providers_now = state.enabled_providers()
+                if not providers_now:
+                    break
+                provider = rng.choice(providers_now)
+                await _run_one(provider, client, state, trigger="scheduler:burst")
                 gap = rng.uniform(cfg.burst_gap_min, cfg.burst_gap_max)
                 try:
                     await asyncio.wait_for(stop.wait(), timeout=gap)
                 except asyncio.TimeoutError:
                     pass
-            log.info("burst_end")
+            state.record_event({
+                "type": "scheduler",
+                "timestamp": _now_iso(),
+                "event": "burst_end",
+            })
         else:
             provider = rng.choice(providers)
-            await _run_one(provider, client, state)
+            await _run_one(provider, client, state, trigger="scheduler")
 
-        # Inter-request sleep (respect shutdown)
+        # Inter-iteration sleep.
         delay = rng.uniform(cfg.min_interval, cfg.max_interval)
         try:
             await asyncio.wait_for(stop.wait(), timeout=delay)
@@ -119,7 +190,32 @@ async def _scheduler(
 
 
 # ---------------------------------------------------------------------------
-# Signal handling & boot
+# Manual-fire worker (out-of-band of the scheduler)
+# ---------------------------------------------------------------------------
+
+async def _manual_fire_worker(
+    state: RunState,
+    client: httpx.AsyncClient,
+    stop: asyncio.Event,
+) -> None:
+    while not stop.is_set():
+        try:
+            name = await asyncio.wait_for(
+                state.manual_fire_queue.get(), timeout=1.0
+            )
+        except asyncio.TimeoutError:
+            continue
+        provider = state.providers_by_name.get(name)
+        if provider is None:
+            continue
+        try:
+            await _run_one(provider, client, state, trigger="manual")
+        except Exception as e:  # noqa: BLE001
+            log.warning("manual_fire_error", target=name, error=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Boot
 # ---------------------------------------------------------------------------
 
 async def _main_async() -> int:
@@ -131,7 +227,7 @@ async def _main_async() -> int:
         log.error("no_providers_configured", categories=sorted(cfg.categories))
         return 2
 
-    state = HealthState()
+    state = RunState(cfg, providers)
     stop = asyncio.Event()
 
     loop = asyncio.get_running_loop()
@@ -139,7 +235,6 @@ async def _main_async() -> int:
         try:
             loop.add_signal_handler(sig, stop.set)
         except NotImplementedError:
-            # Windows; we won't hit this in the container but keep defensive.
             pass
 
     limits = httpx.Limits(
@@ -148,28 +243,41 @@ async def _main_async() -> int:
     )
     timeout = httpx.Timeout(cfg.http_timeout, connect=min(10.0, cfg.http_timeout))
 
+    web_host = os.getenv("WEB_HOST", "0.0.0.0")
+    web_port = int(os.getenv("WEB_PORT", str(cfg.health_port)))
+
     log.info(
         "booting",
         target_count=len(providers),
         enable_real_responses=cfg.enable_real_responses,
-        health_port=cfg.health_port,
+        web_host=web_host,
+        web_port=web_port,
     )
 
     async with httpx.AsyncClient(
         http2=True,
         limits=limits,
         timeout=timeout,
-        follow_redirects=False,  # providers opt in where appropriate
+        follow_redirects=False,
         verify=True,
     ) as client:
         tasks = [
-            asyncio.create_task(run_health_server(cfg.health_port, state)),
-            asyncio.create_task(_scheduler(cfg, providers, client, state, stop)),
+            asyncio.create_task(run_web_server(state, web_host, web_port),
+                                name="web"),
+            asyncio.create_task(_scheduler(state, client, stop),
+                                name="scheduler"),
+            asyncio.create_task(_manual_fire_worker(state, client, stop),
+                                name="fire_worker"),
+            # Watchdog: trip stop when SIGTERM arrives via the event.
+            asyncio.create_task(stop.wait(), name="stop_watch"),
         ]
 
         done, pending = await asyncio.wait(
             tasks, return_when=asyncio.FIRST_COMPLETED
         )
+
+        # Something finished (likely stop_watch). Cancel the rest.
+        stop.set()
         for t in pending:
             t.cancel()
         for t in pending:
@@ -178,9 +286,9 @@ async def _main_async() -> int:
             except (asyncio.CancelledError, Exception):
                 pass
         for t in done:
-            exc = t.exception()
+            exc = t.exception() if not t.cancelled() else None
             if exc:
-                log.error("task_crashed", error=str(exc))
+                log.error("task_crashed", task=t.get_name(), error=str(exc))
 
     log.info("shutdown_complete")
     return 0

@@ -1,0 +1,1165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ai-spray · console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100;300;400;500;700;800&display=swap">
+<style>
+  :root {
+    --bg: #0a0c0e;
+    --bg-elev: #12161a;
+    --bg-elev-2: #191e24;
+    --border: #242a32;
+    --border-strong: #343c46;
+    --text: #d8dee4;
+    --text-dim: #8894a0;
+    --text-faint: #4b5662;
+
+    --accent: #b4ff00;          /* primary: acid lime */
+    --accent-dim: #6b9600;
+    --accent-glow: rgba(180, 255, 0, 0.22);
+    --ok: #2fd470;
+    --warn: #ffb020;
+    --err: #ff4d4d;
+    --info: #6880ff;
+
+    /* Category tint palette — used on category chips and log rails. */
+    --cat-llm_api: #b4ff00;
+    --cat-chatbot_ui: #ffb020;
+    --cat-media_gen: #ff70c4;
+    --cat-aggregator: #6ebbff;
+    --cat-real_response: #8be9fd;
+    --cat-scheduler: #8c94a0;
+
+    --fs-xs: 10px;
+    --fs-sm: 11px;
+    --fs-base: 12px;
+    --fs-md: 13px;
+    --fs-lg: 16px;
+    --fs-xl: 22px;
+    --fs-xxl: 34px;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: var(--fs-base);
+    line-height: 1.4;
+    font-feature-settings: "ss01", "ss02", "zero", "cv11";
+    overflow: hidden;
+  }
+
+  /* Subtle scanline texture on the whole app — anchors the CRT vibe. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(255,255,255,0.012) 0px,
+      rgba(255,255,255,0.012) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    z-index: 1000;
+    mix-blend-mode: overlay;
+  }
+
+  button {
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    padding: 6px 12px;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-weight: 500;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button:active { background: var(--accent-glow); }
+  button.primary {
+    background: var(--accent);
+    color: #0a0c0e;
+    border-color: var(--accent);
+    font-weight: 700;
+  }
+  button.primary:hover { background: #c8ff33; border-color: #c8ff33; color: #000; }
+  button.danger:hover { border-color: var(--err); color: var(--err); }
+
+  input, select {
+    font-family: inherit;
+    font-size: inherit;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    padding: 5px 8px;
+    outline: none;
+  }
+  input:focus, select:focus { border-color: var(--accent); }
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    background: transparent;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 2px; background: var(--border-strong);
+  }
+  input[type="range"]::-moz-range-track {
+    height: 2px; background: var(--border-strong);
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 12px; height: 12px;
+    background: var(--accent); border-radius: 0;
+    margin-top: -5px;
+    border: 2px solid var(--bg);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 12px; height: 12px;
+    background: var(--accent); border-radius: 0;
+    border: 2px solid var(--bg);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Layout                                                              */
+  /* ------------------------------------------------------------------ */
+
+  #app {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    height: 100vh;
+  }
+
+  header.bar {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 24px;
+    align-items: center;
+    padding: 14px 22px;
+    border-bottom: 1px solid var(--border);
+    background:
+      linear-gradient(180deg, #0e1216 0%, #0a0c0e 100%);
+  }
+
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+  .brand .logo {
+    font-weight: 800;
+    font-size: var(--fs-xl);
+    letter-spacing: -0.02em;
+    color: var(--text);
+  }
+  .brand .logo .dot {
+    color: var(--accent);
+    text-shadow: 0 0 12px var(--accent-glow);
+  }
+  .brand .sub {
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+
+  .status-strip {
+    display: flex;
+    gap: 28px;
+    align-items: center;
+    justify-content: center;
+  }
+  .metric {
+    display: flex; flex-direction: column; align-items: flex-start;
+    gap: 2px;
+    padding: 0 6px;
+  }
+  .metric .label {
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+  .metric .value {
+    font-size: var(--fs-xxl);
+    font-weight: 200;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .metric.ok .value { color: var(--ok); }
+  .metric.err .value { color: var(--err); }
+  .metric.accent .value { color: var(--accent); }
+
+  .status-dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    background: var(--ok);
+    border-radius: 50%;
+    box-shadow: 0 0 10px var(--ok);
+    margin-right: 8px;
+    vertical-align: middle;
+  }
+  .paused .status-dot {
+    background: var(--err);
+    box-shadow: 0 0 10px var(--err);
+    animation: none;
+  }
+  .running .status-dot {
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 10px var(--ok); }
+    50% { opacity: 0.35; box-shadow: 0 0 4px var(--ok); }
+  }
+
+  .status-text {
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .running .status-text { color: var(--ok); }
+  .paused .status-text { color: var(--err); }
+
+  .controls {
+    display: flex; gap: 8px;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Main area                                                           */
+  /* ------------------------------------------------------------------ */
+
+  main {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(380px, 1fr);
+    gap: 0;
+    overflow: hidden;
+    border-top: 1px solid var(--border);
+  }
+
+  .panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg);
+  }
+  .panel + .panel {
+    border-left: 1px solid var(--border);
+  }
+
+  .panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-elev);
+  }
+  .panel-title {
+    font-size: var(--fs-xs);
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .panel-title .count {
+    color: var(--accent); margin-left: 10px; font-weight: 700;
+  }
+  .panel-body {
+    flex: 1; min-height: 0; overflow: auto;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Signal stream (log)                                                 */
+  /* ------------------------------------------------------------------ */
+
+  #signal {
+    padding: 0;
+    background:
+      linear-gradient(180deg, rgba(180,255,0,0.02) 0%, transparent 200px),
+      var(--bg);
+    position: relative;
+  }
+  #signal::before {
+    /* Fine scanlines only on the signal panel — evokes SDR waterfall. */
+    content: "";
+    position: absolute; inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(255,255,255,0.02) 0px,
+      rgba(255,255,255,0.02) 1px,
+      transparent 1px,
+      transparent 2px
+    );
+    z-index: 1;
+  }
+
+  .log-row {
+    display: grid;
+    grid-template-columns: 3px 70px 82px 1fr 56px 46px 1.5fr;
+    gap: 10px;
+    padding: 3px 16px 3px 0;
+    border-bottom: 1px solid rgba(36,42,50,0.45);
+    position: relative;
+    z-index: 2;
+    font-size: var(--fs-sm);
+    align-items: baseline;
+    animation: row-in 0.35s ease-out;
+  }
+  @keyframes row-in {
+    from {
+      background: var(--accent-glow);
+      transform: translateX(-4px);
+    }
+    to {
+      background: transparent;
+      transform: translateX(0);
+    }
+  }
+  .log-row .rail { height: 100%; background: var(--text-faint); grid-column: 1; }
+  .log-row .ts { color: var(--text-faint); font-variant-numeric: tabular-nums; }
+  .log-row .cat {
+    font-size: var(--fs-xs);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+  .log-row .target {
+    color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .log-row .method {
+    color: var(--text-faint);
+    font-weight: 500;
+  }
+  .log-row .status {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .log-row .url {
+    color: var(--text-faint);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  .log-row[data-status^="2"] .status { color: var(--ok); }
+  .log-row[data-status^="3"] .status { color: var(--info); }
+  .log-row[data-status^="4"] .status { color: var(--warn); }
+  .log-row[data-status^="5"] .status { color: var(--err); }
+  .log-row[data-status="—"] .status { color: var(--err); }
+
+  /* Category rail colors */
+  .log-row[data-cat="llm_api"]        .rail, .log-row[data-cat="llm_api"] .cat { color: var(--cat-llm_api); }
+  .log-row[data-cat="llm_api"]        .rail { background: var(--cat-llm_api); }
+  .log-row[data-cat="chatbot_ui"]     .rail, .log-row[data-cat="chatbot_ui"] .cat { color: var(--cat-chatbot_ui); }
+  .log-row[data-cat="chatbot_ui"]     .rail { background: var(--cat-chatbot_ui); }
+  .log-row[data-cat="media_gen"]      .rail, .log-row[data-cat="media_gen"] .cat { color: var(--cat-media_gen); }
+  .log-row[data-cat="media_gen"]      .rail { background: var(--cat-media_gen); }
+  .log-row[data-cat="aggregator"]     .rail, .log-row[data-cat="aggregator"] .cat { color: var(--cat-aggregator); }
+  .log-row[data-cat="aggregator"]     .rail { background: var(--cat-aggregator); }
+  .log-row[data-cat="real_response"]  .rail, .log-row[data-cat="real_response"] .cat { color: var(--cat-real_response); }
+  .log-row[data-cat="real_response"]  .rail { background: var(--cat-real_response); }
+  .log-row[data-cat="scheduler"]      .rail, .log-row[data-cat="scheduler"] .cat { color: var(--cat-scheduler); }
+  .log-row[data-cat="scheduler"]      .rail { background: var(--cat-scheduler); }
+  .log-row[data-type="scheduler"] .target { color: var(--text-dim); font-style: italic; }
+
+  #log-filter-bar {
+    display: flex; gap: 8px; align-items: center;
+  }
+  #log-filter {
+    width: 220px;
+    background: var(--bg);
+  }
+  #log-filter::placeholder { color: var(--text-faint); }
+
+  /* ------------------------------------------------------------------ */
+  /* Targets grid                                                        */
+  /* ------------------------------------------------------------------ */
+
+  #targets-body {
+    padding: 12px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+    gap: 8px;
+    align-content: start;
+  }
+
+  .target {
+    border: 1px solid var(--border);
+    padding: 10px 12px;
+    background: var(--bg-elev);
+    display: flex; flex-direction: column; gap: 6px;
+    position: relative;
+    cursor: pointer;
+    transition: border-color 0.12s, background 0.12s;
+    min-height: 78px;
+  }
+  .target:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-elev-2);
+  }
+  .target.disabled {
+    opacity: 0.4;
+  }
+  .target.disabled:hover { opacity: 0.7; }
+
+  .target-head {
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 8px;
+  }
+  .target-name {
+    font-size: var(--fs-md);
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .target-cat-chip {
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+  }
+  .target-body {
+    display: flex; justify-content: space-between; align-items: flex-end;
+    gap: 8px;
+  }
+  .target-hits {
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .target-hits .n {
+    font-size: var(--fs-lg);
+    font-weight: 200;
+    color: var(--text);
+    letter-spacing: -0.02em;
+    margin-right: 3px;
+    font-variant-numeric: tabular-nums;
+  }
+  .target-status {
+    font-size: var(--fs-xs);
+    padding: 2px 5px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-faint);
+    border: 1px solid var(--border);
+  }
+  .target-status[data-s^="2"] { color: var(--ok); border-color: var(--ok); }
+  .target-status[data-s^="3"] { color: var(--info); border-color: var(--info); }
+  .target-status[data-s^="4"] { color: var(--warn); border-color: var(--warn); }
+  .target-status[data-s^="5"] { color: var(--err); border-color: var(--err); }
+  .target-status[data-s="ERR"] { color: var(--err); border-color: var(--err); }
+
+  .target-actions {
+    position: absolute; top: 8px; right: 8px;
+    display: none; gap: 4px;
+  }
+  .target:hover .target-actions { display: flex; }
+  .target-actions button {
+    padding: 2px 6px;
+    font-size: 10px;
+    background: var(--bg);
+  }
+
+  /* Category rails on left edge of target card */
+  .target[data-cat="llm_api"]       { box-shadow: inset 3px 0 0 0 var(--cat-llm_api); }
+  .target[data-cat="chatbot_ui"]    { box-shadow: inset 3px 0 0 0 var(--cat-chatbot_ui); }
+  .target[data-cat="media_gen"]     { box-shadow: inset 3px 0 0 0 var(--cat-media_gen); }
+  .target[data-cat="aggregator"]    { box-shadow: inset 3px 0 0 0 var(--cat-aggregator); }
+  .target[data-cat="real_response"] { box-shadow: inset 3px 0 0 0 var(--cat-real_response); }
+
+  /* ------------------------------------------------------------------ */
+  /* Category chips above the grid                                       */
+  /* ------------------------------------------------------------------ */
+
+  .cat-chips {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-elev);
+  }
+  .cat-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--border-strong);
+    font-size: var(--fs-xs);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+  }
+  .cat-chip .swatch {
+    width: 8px; height: 8px; background: var(--text-faint);
+  }
+  .cat-chip[data-cat="llm_api"]       .swatch { background: var(--cat-llm_api); }
+  .cat-chip[data-cat="chatbot_ui"]    .swatch { background: var(--cat-chatbot_ui); }
+  .cat-chip[data-cat="media_gen"]     .swatch { background: var(--cat-media_gen); }
+  .cat-chip[data-cat="aggregator"]    .swatch { background: var(--cat-aggregator); }
+  .cat-chip[data-cat="real_response"] .swatch { background: var(--cat-real_response); }
+  .cat-chip.off { opacity: 0.35; }
+  .cat-chip.off .swatch { background: var(--text-faint) !important; }
+  .cat-chip:hover { border-color: var(--accent); }
+
+  /* ------------------------------------------------------------------ */
+  /* Config drawer                                                       */
+  /* ------------------------------------------------------------------ */
+
+  .drawer {
+    border-top: 1px solid var(--border);
+    background: var(--bg-elev);
+    transition: max-height 0.22s ease;
+    max-height: 260px;
+    overflow: hidden;
+  }
+  .drawer.collapsed { max-height: 42px; }
+
+  .drawer-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 22px;
+    cursor: pointer;
+    user-select: none;
+    height: 42px;
+  }
+  .drawer-title {
+    font-size: var(--fs-xs);
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .drawer-toggle { color: var(--text-faint); font-size: var(--fs-sm); }
+  .drawer.collapsed .drawer-toggle::after { content: "EXPAND ▲"; }
+  .drawer:not(.collapsed) .drawer-toggle::after { content: "COLLAPSE ▼"; }
+
+  .drawer-body {
+    padding: 0 22px 18px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 22px 36px;
+  }
+
+  .knob {
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .knob-label {
+    display: flex; justify-content: space-between;
+    font-size: var(--fs-xs);
+    color: var(--text-dim);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .knob-label .val {
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Toasts                                                              */
+  /* ------------------------------------------------------------------ */
+
+  #toasts {
+    position: fixed; bottom: 18px; right: 18px;
+    display: flex; flex-direction: column; gap: 6px;
+    z-index: 2000;
+  }
+  .toast {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border-strong);
+    border-left: 3px solid var(--accent);
+    padding: 8px 14px;
+    font-size: var(--fs-sm);
+    letter-spacing: 0.04em;
+    animation: toast-in 0.18s ease-out;
+  }
+  .toast.err { border-left-color: var(--err); }
+  @keyframes toast-in {
+    from { transform: translateX(12px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Scrollbars                                                          */
+  /* ------------------------------------------------------------------ */
+
+  .panel-body::-webkit-scrollbar { width: 10px; height: 10px; }
+  .panel-body::-webkit-scrollbar-track { background: var(--bg); }
+  .panel-body::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border: 3px solid var(--bg);
+  }
+  .panel-body::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
+
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; }
+    .panel + .panel { border-left: 0; border-top: 1px solid var(--border); }
+    .status-strip { gap: 14px; }
+    .metric .value { font-size: 22px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ========================================================== -->
+  <!-- Header                                                       -->
+  <!-- ========================================================== -->
+  <header class="bar" id="header">
+    <div class="brand">
+      <span class="logo">ai<span class="dot">·</span>spray</span>
+      <span class="sub">SASE · APPLICATION · FLOW · SIMULATOR</span>
+    </div>
+
+    <div class="status-strip">
+      <div class="metric">
+        <span class="label">TX</span>
+        <span class="value" id="m-total">0</span>
+      </div>
+      <div class="metric ok">
+        <span class="label">OK</span>
+        <span class="value" id="m-ok">0</span>
+      </div>
+      <div class="metric err">
+        <span class="label">ERR</span>
+        <span class="value" id="m-err">0</span>
+      </div>
+      <div class="metric accent">
+        <span class="label">TARGETS</span>
+        <span class="value" id="m-targets">0<span style="color:var(--text-faint); font-weight:200;">/0</span></span>
+      </div>
+      <div class="metric">
+        <span class="label">UPTIME</span>
+        <span class="value" id="m-uptime" style="font-size: 22px;">—</span>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div id="status-indicator" class="running">
+        <span class="status-dot"></span>
+        <span class="status-text" id="status-label">RUNNING</span>
+      </div>
+      <button id="btn-pause">Pause</button>
+      <button id="btn-fire">Fire 1</button>
+      <button class="primary" id="btn-burst">Burst × 5</button>
+    </div>
+  </header>
+
+  <!-- ========================================================== -->
+  <!-- Main grid: signal (log) | targets                            -->
+  <!-- ========================================================== -->
+  <main>
+
+    <section class="panel" id="signal-panel">
+      <div class="panel-header">
+        <span class="panel-title">SIGNAL <span class="count" id="signal-count">0</span></span>
+        <div id="log-filter-bar">
+          <input type="text" id="log-filter" placeholder="filter · text, target, category, status…">
+          <button id="btn-clear">Clear</button>
+        </div>
+      </div>
+      <div class="panel-body" id="signal"></div>
+    </section>
+
+    <section class="panel" id="targets-panel">
+      <div class="panel-header">
+        <span class="panel-title">TARGETS <span class="count" id="targets-count">0</span></span>
+        <span class="panel-title" style="color:var(--text-faint);">CLICK · FIRE · DBL-CLICK · TOGGLE</span>
+      </div>
+      <div id="cat-chips" class="cat-chips"></div>
+      <div class="panel-body">
+        <div id="targets-body"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ========================================================== -->
+  <!-- Config drawer                                                -->
+  <!-- ========================================================== -->
+  <aside class="drawer collapsed" id="drawer">
+    <div class="drawer-header" id="drawer-toggle">
+      <span class="drawer-title">PACING &amp; BURST CONFIGURATION</span>
+      <span class="drawer-toggle"></span>
+    </div>
+    <div class="drawer-body">
+      <div class="knob">
+        <div class="knob-label">
+          <span>Min interval</span>
+          <span class="val"><span id="v-min-interval">30</span>s</span>
+        </div>
+        <input type="range" id="min-interval" min="1" max="600" step="1">
+      </div>
+      <div class="knob">
+        <div class="knob-label">
+          <span>Max interval</span>
+          <span class="val"><span id="v-max-interval">180</span>s</span>
+        </div>
+        <input type="range" id="max-interval" min="1" max="1800" step="1">
+      </div>
+      <div class="knob">
+        <div class="knob-label">
+          <span>Burst probability</span>
+          <span class="val"><span id="v-burst-prob">15</span>%</span>
+        </div>
+        <input type="range" id="burst-prob" min="0" max="100" step="1">
+      </div>
+      <div class="knob">
+        <div class="knob-label">
+          <span>Burst min size</span>
+          <span class="val"><span id="v-burst-min">3</span></span>
+        </div>
+        <input type="range" id="burst-min" min="1" max="20" step="1">
+      </div>
+      <div class="knob">
+        <div class="knob-label">
+          <span>Burst max size</span>
+          <span class="val"><span id="v-burst-max">7</span></span>
+        </div>
+        <input type="range" id="burst-max" min="1" max="20" step="1">
+      </div>
+      <div class="knob">
+        <div class="knob-label">
+          <span>Burst gap range</span>
+          <span class="val"><span id="v-burst-gap-min">1</span>s – <span id="v-burst-gap-max">4</span>s</span>
+        </div>
+        <input type="range" id="burst-gap-min" min="0" max="30" step="1">
+        <input type="range" id="burst-gap-max" min="0" max="30" step="1">
+      </div>
+    </div>
+  </aside>
+
+  <div id="toasts"></div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const MAX_LOG_ROWS = 400;
+
+  // --------------------------------------------------------------
+  // State
+  // --------------------------------------------------------------
+  const S = {
+    stream: null,
+    rows: [],            // array of event objects, newest first
+    filter: "",
+    paused: false,
+    allCategories: [],
+    enabledCategories: new Set(),
+    targets: new Map(),  // name -> target record
+  };
+
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
+    {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]
+  ));
+
+  // --------------------------------------------------------------
+  // API
+  // --------------------------------------------------------------
+  async function api(path, opts = {}) {
+    const res = await fetch(path, {
+      headers: opts.body ? { "Content-Type": "application/json" } : undefined,
+      method: opts.method || "GET",
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    if (!res.ok) {
+      let msg = `${res.status}`;
+      try { const j = await res.json(); if (j.error) msg = j.error; } catch {}
+      throw new Error(msg);
+    }
+    return res.json();
+  }
+
+  // --------------------------------------------------------------
+  // Toasts
+  // --------------------------------------------------------------
+  function toast(msg, kind = "") {
+    const el = document.createElement("div");
+    el.className = "toast " + kind;
+    el.textContent = msg;
+    $("#toasts").append(el);
+    setTimeout(() => el.remove(), 2600);
+  }
+
+  // --------------------------------------------------------------
+  // Header / status
+  // --------------------------------------------------------------
+  function fmtUptime(sec) {
+    if (sec == null) return "—";
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    if (d) return `${d}d ${h}h`;
+    if (h) return `${h}h${String(m).padStart(2, "0")}`;
+    if (m) return `${m}m${String(s).padStart(2, "0")}`;
+    return `${s}s`;
+  }
+
+  function renderStatus(st) {
+    S.paused = !!st.paused;
+    const ind = $("#status-indicator");
+    ind.classList.toggle("running", !S.paused);
+    ind.classList.toggle("paused", S.paused);
+    $("#status-label").textContent = S.paused ? "PAUSED" : "RUNNING";
+    $("#btn-pause").textContent = S.paused ? "Resume" : "Pause";
+    $("#btn-pause").classList.toggle("primary", S.paused);
+
+    const h = st.health || {};
+    $("#m-total").textContent = (h.total_requests || 0).toLocaleString();
+    $("#m-ok").textContent = (h.total_ok || 0).toLocaleString();
+    $("#m-err").textContent = (h.total_errors || 0).toLocaleString();
+    $("#m-uptime").textContent = fmtUptime(h.uptime_seconds);
+    $("#m-targets").innerHTML = `${st.enabled_target_count || 0}<span style="color:var(--text-faint); font-weight:200;">/${st.target_count || 0}</span>`;
+
+    S.allCategories = st.all_categories || [];
+    S.enabledCategories = new Set(st.enabled_categories || []);
+    renderCatChips();
+
+    // Sync sliders
+    syncKnobs(st.runtime_config || {});
+  }
+
+  // --------------------------------------------------------------
+  // Category chips
+  // --------------------------------------------------------------
+  function renderCatChips() {
+    const root = $("#cat-chips");
+    root.innerHTML = S.allCategories.map((c) => {
+      const on = S.enabledCategories.has(c);
+      return `<div class="cat-chip ${on ? "" : "off"}" data-cat="${c}">
+        <span class="swatch"></span><span>${c.replace("_", " ")}</span>
+      </div>`;
+    }).join("");
+    $$(".cat-chip", root).forEach((el) => {
+      el.onclick = async () => {
+        const cat = el.dataset.cat;
+        const newOn = el.classList.contains("off"); // flipping
+        el.classList.toggle("off");
+        try {
+          await api(`/api/categories/${encodeURIComponent(cat)}/toggle`, {
+            method: "POST", body: { enabled: newOn },
+          });
+          if (newOn) S.enabledCategories.add(cat);
+          else S.enabledCategories.delete(cat);
+          refreshTargets();
+        } catch (e) {
+          toast(`toggle failed: ${e.message}`, "err");
+          el.classList.toggle("off"); // revert
+        }
+      };
+    });
+  }
+
+  // --------------------------------------------------------------
+  // Targets grid
+  // --------------------------------------------------------------
+  async function refreshTargets() {
+    try {
+      const { targets } = await api("/api/targets");
+      S.targets = new Map(targets.map((t) => [t.name, t]));
+      renderTargets();
+    } catch (e) {
+      console.error("targets fetch", e);
+    }
+  }
+
+  function renderTargets() {
+    const root = $("#targets-body");
+    const frag = document.createDocumentFragment();
+    const sorted = [...S.targets.values()].sort((a, b) => {
+      if (a.category !== b.category) return a.category.localeCompare(b.category);
+      return a.name.localeCompare(b.name);
+    });
+    sorted.forEach((t) => {
+      const card = document.createElement("div");
+      card.className = "target" + (t.effective_enabled ? "" : " disabled");
+      card.dataset.cat = t.category;
+      card.dataset.name = t.name;
+      const status = t.last_status ?? (t.hits ? "ERR" : "—");
+      const statusAttr = t.last_status == null ? (t.hits ? "ERR" : "—") : String(t.last_status);
+      card.innerHTML = `
+        <div class="target-head">
+          <span class="target-name">${esc(t.name)}</span>
+          <span class="target-cat-chip">${esc(t.category)}</span>
+        </div>
+        <div class="target-body">
+          <span class="target-hits"><span class="n">${t.hits}</span>hits</span>
+          <span class="target-status" data-s="${esc(statusAttr)}">${esc(status)}</span>
+        </div>
+        <div class="target-actions">
+          <button data-action="toggle">${t.individually_enabled ? "OFF" : "ON"}</button>
+        </div>
+      `;
+
+      card.onclick = async (e) => {
+        if (e.target.dataset.action === "toggle") return;
+        try {
+          const r = await api("/api/fire", {
+            method: "POST", body: { target: t.name },
+          });
+          toast(`fired · ${r.queued}`);
+        } catch (err) {
+          toast(`fire failed: ${err.message}`, "err");
+        }
+      };
+
+      card.querySelector('[data-action="toggle"]').onclick = async (e) => {
+        e.stopPropagation();
+        try {
+          const r = await api(`/api/targets/${encodeURIComponent(t.name)}/toggle`, {
+            method: "POST", body: { enabled: !t.individually_enabled },
+          });
+          t.individually_enabled = r.individually_enabled;
+          t.effective_enabled = r.effective_enabled;
+          renderTargets();
+        } catch (err) {
+          toast(`toggle failed: ${err.message}`, "err");
+        }
+      };
+
+      frag.appendChild(card);
+    });
+    root.replaceChildren(frag);
+    $("#targets-count").textContent = sorted.length;
+  }
+
+  // --------------------------------------------------------------
+  // Signal stream (log)
+  // --------------------------------------------------------------
+  function startStream() {
+    if (S.stream) S.stream.close();
+    S.stream = new EventSource("/api/logs/stream");
+    S.rows = [];
+    $("#signal").innerHTML = "";
+
+    S.stream.onmessage = (ev) => {
+      let event;
+      try { event = JSON.parse(ev.data); } catch { return; }
+      S.rows.unshift(event);
+      if (S.rows.length > MAX_LOG_ROWS) S.rows.pop();
+      renderLogs();
+      updateTargetHit(event);
+    };
+    S.stream.onerror = () => {
+      // EventSource will auto-retry; show a ghost row
+    };
+  }
+
+  function updateTargetHit(ev) {
+    if (ev.type !== "traffic") return;
+    const t = S.targets.get(ev.target);
+    if (!t) return;
+    t.hits = (t.hits || 0) + 1;
+    t.last_status = ev.status;
+    t.last_ok = ev.ok;
+    // Update just this card without full re-render
+    const card = $(`.target[data-name="${CSS.escape(ev.target)}"]`);
+    if (!card) return;
+    card.querySelector(".target-hits .n").textContent = t.hits;
+    const statusEl = card.querySelector(".target-status");
+    const val = ev.status == null ? "ERR" : String(ev.status);
+    statusEl.textContent = val;
+    statusEl.dataset.s = val;
+  }
+
+  function renderLogs() {
+    const root = $("#signal");
+    const q = S.filter.trim().toLowerCase();
+    const rows = q
+      ? S.rows.filter((r) => matches(r, q))
+      : S.rows;
+
+    // Cap rendered rows for perf.
+    const shown = rows.slice(0, 200);
+    root.innerHTML = shown.map(rowHTML).join("");
+    $("#signal-count").textContent = `${shown.length}${rows.length > shown.length ? "+" : ""}`;
+  }
+
+  function matches(ev, q) {
+    return (
+      (ev.target || "").toLowerCase().includes(q) ||
+      (ev.category || "").toLowerCase().includes(q) ||
+      (ev.url || "").toLowerCase().includes(q) ||
+      String(ev.status || "").toLowerCase().includes(q) ||
+      (ev.method || "").toLowerCase().includes(q) ||
+      (ev.event || "").toLowerCase().includes(q)
+    );
+  }
+
+  function rowHTML(ev) {
+    const isScheduler = ev.type === "scheduler";
+    const ts = (ev.timestamp || "").split("T")[1]?.replace("Z","").substring(0, 8) || "";
+    if (isScheduler) {
+      const msg = ev.event === "config_updated"
+        ? `config · ${(ev.fields || []).join(", ")}`
+        : (ev.event || "scheduler");
+      return `<div class="log-row" data-cat="scheduler" data-type="scheduler" data-status="—">
+        <span class="rail"></span>
+        <span class="ts">${esc(ts)}</span>
+        <span class="cat">sys</span>
+        <span class="target">· ${esc(msg)} ·</span>
+        <span class="method"></span>
+        <span class="status">—</span>
+        <span class="url"></span>
+      </div>`;
+    }
+    const status = ev.status == null ? "—" : String(ev.status);
+    return `<div class="log-row" data-cat="${esc(ev.category || '')}" data-status="${esc(status)}">
+      <span class="rail"></span>
+      <span class="ts">${esc(ts)}</span>
+      <span class="cat">${esc((ev.category || '').replace('_', ' '))}</span>
+      <span class="target" title="${esc(ev.target || '')}">${esc(ev.target || '')}</span>
+      <span class="method">${esc(ev.method || '')}</span>
+      <span class="status">${esc(status)}</span>
+      <span class="url" title="${esc(ev.url || '')}">${esc(ev.url || '')}</span>
+    </div>`;
+  }
+
+  // --------------------------------------------------------------
+  // Config drawer / knobs
+  // --------------------------------------------------------------
+  function syncKnobs(cfg) {
+    const set = (id, val) => {
+      const el = $(`#${id}`);
+      if (el && document.activeElement !== el) el.value = val;
+    };
+    set("min-interval", cfg.min_interval);
+    set("max-interval", cfg.max_interval);
+    set("burst-prob", Math.round((cfg.burst_probability || 0) * 100));
+    set("burst-min", cfg.burst_min_size);
+    set("burst-max", cfg.burst_max_size);
+    set("burst-gap-min", cfg.burst_gap_min);
+    set("burst-gap-max", cfg.burst_gap_max);
+
+    $("#v-min-interval").textContent = Math.round(cfg.min_interval);
+    $("#v-max-interval").textContent = Math.round(cfg.max_interval);
+    $("#v-burst-prob").textContent = Math.round((cfg.burst_probability || 0) * 100);
+    $("#v-burst-min").textContent = cfg.burst_min_size;
+    $("#v-burst-max").textContent = cfg.burst_max_size;
+    $("#v-burst-gap-min").textContent = cfg.burst_gap_min;
+    $("#v-burst-gap-max").textContent = cfg.burst_gap_max;
+  }
+
+  function debounce(fn, delay) {
+    let t;
+    return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), delay); };
+  }
+
+  const pushConfig = debounce(async () => {
+    const body = {
+      min_interval: +$("#min-interval").value,
+      max_interval: +$("#max-interval").value,
+      burst_probability: (+$("#burst-prob").value) / 100,
+      burst_min_size: +$("#burst-min").value,
+      burst_max_size: +$("#burst-max").value,
+      burst_gap_min: +$("#burst-gap-min").value,
+      burst_gap_max: +$("#burst-gap-max").value,
+    };
+    try {
+      await api("/api/config", { method: "POST", body });
+    } catch (e) {
+      toast(`config · ${e.message}`, "err");
+    }
+  }, 400);
+
+  function wireKnobs() {
+    [
+      ["min-interval", "v-min-interval"],
+      ["max-interval", "v-max-interval"],
+      ["burst-prob", "v-burst-prob"],
+      ["burst-min", "v-burst-min"],
+      ["burst-max", "v-burst-max"],
+      ["burst-gap-min", "v-burst-gap-min"],
+      ["burst-gap-max", "v-burst-gap-max"],
+    ].forEach(([knob, disp]) => {
+      $(`#${knob}`).oninput = (e) => {
+        $(`#${disp}`).textContent = e.target.value;
+        pushConfig();
+      };
+    });
+  }
+
+  // --------------------------------------------------------------
+  // Global controls
+  // --------------------------------------------------------------
+  function wireControls() {
+    $("#btn-pause").onclick = async () => {
+      try {
+        await api(S.paused ? "/api/control/resume" : "/api/control/pause", {
+          method: "POST",
+        });
+        await refreshStatus();
+        toast(S.paused ? "running" : "paused");
+      } catch (e) { toast(e.message, "err"); }
+    };
+    $("#btn-fire").onclick = async () => {
+      try {
+        const r = await api("/api/fire", { method: "POST", body: {} });
+        toast(`fired · ${r.queued}`);
+      } catch (e) { toast(e.message, "err"); }
+    };
+    $("#btn-burst").onclick = async () => {
+      try {
+        const r = await api("/api/burst", { method: "POST", body: { size: 5 } });
+        toast(`burst · ${r.count} queued`);
+      } catch (e) { toast(e.message, "err"); }
+    };
+    $("#btn-clear").onclick = () => {
+      S.rows = []; renderLogs();
+    };
+    $("#log-filter").oninput = (e) => {
+      S.filter = e.target.value; renderLogs();
+    };
+    $("#drawer-toggle").onclick = () => {
+      $("#drawer").classList.toggle("collapsed");
+    };
+  }
+
+  // --------------------------------------------------------------
+  // Boot
+  // --------------------------------------------------------------
+  async function refreshStatus() {
+    try {
+      const st = await api("/api/state");
+      renderStatus(st);
+    } catch (e) {
+      console.error("state fetch", e);
+    }
+  }
+
+  async function init() {
+    wireControls();
+    wireKnobs();
+    await refreshStatus();
+    await refreshTargets();
+    startStream();
+    setInterval(refreshStatus, 3000);
+    setInterval(refreshTargets, 15000);
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
