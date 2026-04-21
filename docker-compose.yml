@@ -1,0 +1,21 @@
+services:
+  ai-spray:
+    build: .
+    image: ai-spray:latest
+    container_name: ai-spray
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      # Bind health port only to loopback by default. Change to 0.0.0.0
+      # or a LAN IP if you want Cato/other hosts to scrape /metrics.
+      - "127.0.0.1:8080:8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # Optional: pin DNS to your Cato-facing resolver so DNS flows also
+    # traverse the SASE fabric.
+    # dns:
+    #   - 192.168.40.1

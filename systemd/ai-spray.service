@@ -1,0 +1,29 @@
+[Unit]
+Description=AI Traffic Simulator (Cato app-ID lab)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+
+# Path to the project directory on the host. Adjust if you place it
+# elsewhere.
+WorkingDirectory=/opt/ai-spray
+
+# Use `docker compose` v2 (built into Docker Engine). If you still have
+# the old `docker-compose` binary, replace these with:
+#   ExecStart=/usr/local/bin/docker-compose up
+ExecStartPre=/usr/bin/docker compose pull --ignore-pull-failures
+ExecStartPre=/usr/bin/docker compose build
+ExecStart=/usr/bin/docker compose up
+ExecStop=/usr/bin/docker compose down
+
+# Capture stdout/stderr in the journal.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

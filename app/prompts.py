@@ -1,0 +1,48 @@
+"""Benign, varied prompt corpora used to drive simulated LLM requests."""
+from __future__ import annotations
+
+TEXT_PROMPTS: list[str] = [
+    "Explain how TCP congestion control works in simple terms.",
+    "Write a short haiku about a thunderstorm over the ocean.",
+    "What are three interesting facts about octopuses?",
+    "Summarize the plot of Dune in two sentences.",
+    "Recommend a weeknight pasta recipe using pantry ingredients.",
+    "Compare LangChain and LlamaIndex at a high level.",
+    "What is the difference between latency and throughput?",
+    "Give me five unusual hobbies worth trying in winter.",
+    "Explain quantum entanglement to a curious 12-year-old.",
+    "Write a Python one-liner that flattens a nested list.",
+    "What causes the aurora borealis?",
+    "Suggest a four-day itinerary for a first visit to Lisbon.",
+    "How does a software-defined radio actually work?",
+    "Describe the taste of a perfectly ripe peach.",
+    "List common mistakes beginners make with sourdough.",
+    "What is the CAP theorem and why does it matter?",
+    "Write a limerick about a cat who wants to be a pilot.",
+    "Explain public-key cryptography using a mailbox analogy.",
+    "What are the pros and cons of monorepos versus polyrepos?",
+    "Give me a 30-second elevator pitch for a fictional app that tracks houseplant health.",
+    "Describe a cozy rainy-day afternoon in 3 sentences.",
+    "What does 'eventual consistency' mean for distributed databases?",
+    "Suggest three approachable jazz albums for someone new to the genre.",
+    "Explain what a Kalman filter does without using any math.",
+    "Write a short poem about an old radio station at 3 a.m.",
+    "How do HTTP/2 and HTTP/3 differ under the hood?",
+    "What's a good gift for someone who loves board games?",
+    "Describe the smell of an old bookstore.",
+    "Explain the bias-variance tradeoff using a darts analogy.",
+    "What are the tradeoffs between REST and gRPC?",
+]
+
+IMAGE_PROMPTS: list[str] = [
+    "a serene mountain lake at sunrise, painterly style",
+    "a cyberpunk street food vendor in the rain, neon reflections",
+    "an old ham radio operator's cluttered desk, warm lamp light",
+    "a cozy reading nook with autumn leaves outside the window",
+    "a vintage lighthouse during a lightning storm, dramatic clouds",
+    "a watercolor of a fox curled up in a snowy forest clearing",
+    "a retro 1980s computer lab with CRT monitors and houseplants",
+    "an astronaut planting a single flower on a barren red planet",
+    "a sunny Mediterranean coastal village, pastel buildings",
+    "a steampunk airship docking at a clock tower at dawn",
+]
