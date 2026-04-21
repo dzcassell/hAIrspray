@@ -58,9 +58,13 @@ docker compose logs -f
 Health + metrics:
 
 ```bash
-curl -s http://127.0.0.1:8080/healthz
-curl -s http://127.0.0.1:8080/metrics | jq
+curl -s http://127.0.0.1:8090/healthz
+curl -s http://127.0.0.1:8090/metrics | jq
 ```
+
+The container listens on port 8080 internally. The host-side port is
+controlled by `HEALTH_HOST_PORT` in `.env` (default `8090`) because
+`8080` is frequently owned by cadvisor or similar monitoring stacks.
 
 ## Running under systemd
 
@@ -89,7 +93,8 @@ All knobs via env vars (see `.env.example`):
 | `HTTP_TIMEOUT_SEC`        | `30`       | Per-request timeout                               |
 | `MAX_CONCURRENT`          | `1`        | Kept at 1 so traffic looks human-paced            |
 | `LOG_LEVEL`               | `INFO`     | `DEBUG` / `INFO` / `WARNING` / `ERROR`            |
-| `HEALTH_PORT`             | `8080`     | Port for `/healthz` and `/metrics`                |
+| `HEALTH_PORT`             | `8080`     | Port the container listens on internally          |
+| `HEALTH_HOST_PORT`        | `8090`     | Host-side port mapping (avoids cadvisor on 8080)  |
 
 ## Observability
 
