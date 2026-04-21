@@ -294,17 +294,19 @@ def _real_response_providers() -> list[Provider]:
 # Public builder
 # ---------------------------------------------------------------------------
 
-def build_registry(categories: set[str]) -> list[Provider]:
-    """Return the flat list of providers enabled for the given categories."""
-    registry: list[Provider] = []
-    if "llm_api" in categories:
-        registry += _llm_api_probes()
-    if "chatbot_ui" in categories:
-        registry += _chatbot_ui_visits()
-    if "media_gen" in categories:
-        registry += _media_gen_visits()
-    if "aggregator" in categories:
-        registry += _aggregator_targets()
-    if "real_response" in categories:
-        registry += _real_response_providers()
-    return registry
+def build_registry(categories: set[str] | None = None) -> list[Provider]:
+    """Return the flat list of providers.
+
+    With ``categories=None`` (the default used at runtime), every provider
+    is returned so the live UI can re-enable a category at any time. Pass
+    an explicit ``categories`` set to pre-filter (useful for tests).
+    """
+    all_providers: list[Provider] = []
+    all_providers += _llm_api_probes()
+    all_providers += _chatbot_ui_visits()
+    all_providers += _media_gen_visits()
+    all_providers += _aggregator_targets()
+    all_providers += _real_response_providers()
+    if categories is None:
+        return all_providers
+    return [p for p in all_providers if p.category in categories]

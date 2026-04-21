@@ -1,137 +1,262 @@
 """Shared mutable run-state.
 
-All the bits the scheduler and the web server both touch live here:
+The scheduler and the HTTP API both hold a reference to a single
+``AppState`` instance. It owns:
 
-* ``RuntimeConfig`` — the pacing/burst knobs, mutated live via the UI.
-* ``HealthState``   — aggregate counters.
-* ``RunState``      — the umbrella object held by both the scheduler
-  task and the aiohttp app.
-
-The SSE broadcast is a simple ring buffer + fan-out: every recorded
-event gets appended to ``event_ring`` and pushed into each subscriber's
-``asyncio.Queue``. Slow or dead subscribers are pruned lazily.
+* the current ``Config`` (mutable via ``update_config``)
+* per-target enabled flags
+* a paused/running event for the scheduler loop
+* aggregate counters (for ``/metrics`` and the dashboard)
+* a ring buffer of recent events and a fan-out to SSE subscribers
 """
 from __future__ import annotations
 
 import asyncio
-import collections
 import time
-from dataclasses import dataclass, field
-from typing import Any, Deque, Set
+from collections import deque
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any
 
-from .config import Config
+from .config import VALID_CATEGORIES, Config
+
+if TYPE_CHECKING:
+    from .providers import Provider
 
 
-# ---------------------------------------------------------------------------
-# Runtime config (mutable version of the pacing knobs)
-# ---------------------------------------------------------------------------
+# Fields that can be changed at runtime via PATCH /api/config.
+# Anything not in this set requires a container restart.
+LIVE_TUNABLE_FIELDS: frozenset[str] = frozenset({
+    "min_interval", "max_interval",
+    "burst_probability",
+    "burst_min_size", "burst_max_size",
+    "burst_gap_min", "burst_gap_max",
+    "categories",
+    "enable_real_responses",
+})
 
-@dataclass
-class RuntimeConfig:
-    min_interval: float
-    max_interval: float
-    burst_probability: float
-    burst_min_size: int
-    burst_max_size: int
-    burst_gap_min: float
-    burst_gap_max: float
 
-    @classmethod
-    def from_config(cls, cfg: Config) -> "RuntimeConfig":
-        return cls(
-            min_interval=cfg.min_interval,
-            max_interval=cfg.max_interval,
-            burst_probability=cfg.burst_probability,
-            burst_min_size=cfg.burst_min_size,
-            burst_max_size=cfg.burst_max_size,
-            burst_gap_min=cfg.burst_gap_min,
-            burst_gap_max=cfg.burst_gap_max,
+class AppState:
+    def __init__(
+        self,
+        initial_config: Config,
+        providers: list["Provider"],
+    ) -> None:
+        self._config = initial_config
+        # Dict preserves insertion order so the UI table stays stable.
+        self._providers: dict[str, "Provider"] = {p.name: p for p in providers}
+        self._enabled: dict[str, bool] = {p.name: True for p in providers}
+
+        self._running = asyncio.Event()
+        self._running.set()
+
+        # Stats
+        self.started_at: float = time.time()
+        self.last_tick_at: float | None = None
+        self.total_requests: int = 0
+        self.total_ok: int = 0
+        self.total_errors: int = 0
+        self.per_category: dict[str, int] = {}
+        self.per_target_count: dict[str, int] = {}
+        self.per_target_last_status: dict[str, Any] = {}
+
+        # Event fan-out
+        self._buffer: deque = deque(maxlen=1000)
+        self._subs: set[asyncio.Queue] = set()
+
+        self._cfg_lock = asyncio.Lock()
+
+    # ------------------------------------------------------------------
+    # Config
+    # ------------------------------------------------------------------
+
+    @property
+    def config(self) -> Config:
+        return self._config
+
+    async def update_config(self, changes: dict[str, Any]) -> dict[str, Any]:
+        """Apply a partial config update. Returns the set of changes
+        actually applied (invalid fields / values are silently dropped)."""
+        applied: dict[str, Any] = {}
+
+        for key, value in changes.items():
+            if key not in LIVE_TUNABLE_FIELDS:
+                continue
+
+            if key == "categories":
+                if not isinstance(value, (list, tuple, set)):
+                    continue
+                cats = {str(c).strip() for c in value}
+                cats &= VALID_CATEGORIES
+                applied[key] = cats
+
+            elif key == "burst_probability":
+                try:
+                    fv = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if 0.0 <= fv <= 1.0:
+                    applied[key] = fv
+
+            elif key in ("burst_min_size", "burst_max_size"):
+                try:
+                    iv = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if iv >= 1:
+                    applied[key] = iv
+
+            elif key in ("min_interval", "max_interval",
+                         "burst_gap_min", "burst_gap_max"):
+                try:
+                    fv = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if fv >= 0:
+                    applied[key] = fv
+
+            elif key == "enable_real_responses":
+                applied[key] = bool(value)
+
+        # Coerce sanity: ensure min <= max for the two ranges.
+        new_min = applied.get("min_interval", self._config.min_interval)
+        new_max = applied.get("max_interval", self._config.max_interval)
+        if new_min > new_max:
+            applied["min_interval"], applied["max_interval"] = new_max, new_min
+
+        new_bmin = applied.get("burst_min_size", self._config.burst_min_size)
+        new_bmax = applied.get("burst_max_size", self._config.burst_max_size)
+        if new_bmin > new_bmax:
+            applied["burst_min_size"], applied["burst_max_size"] = new_bmax, new_bmin
+
+        if applied:
+            async with self._cfg_lock:
+                self._config = replace(self._config, **applied)
+
+        return applied
+
+    # ------------------------------------------------------------------
+    # Scheduler pause / resume
+    # ------------------------------------------------------------------
+
+    def is_running(self) -> bool:
+        return self._running.is_set()
+
+    def pause(self) -> None:
+        self._running.clear()
+
+    def resume(self) -> None:
+        self._running.set()
+
+    async def wait_for_resume(self) -> None:
+        await self._running.wait()
+
+    # ------------------------------------------------------------------
+    # Targets
+    # ------------------------------------------------------------------
+
+    def all_providers(self) -> list["Provider"]:
+        return list(self._providers.values())
+
+    def get_provider(self, name: str) -> "Provider | None":
+        return self._providers.get(name)
+
+    def is_enabled(self, name: str) -> bool:
+        return self._enabled.get(name, True)
+
+    def set_enabled(self, name: str, enabled: bool) -> bool:
+        if name not in self._providers:
+            return False
+        self._enabled[name] = bool(enabled)
+        return True
+
+    def eligible_providers(self) -> list["Provider"]:
+        """Providers that (a) are individually enabled AND
+        (b) belong to a currently-enabled category."""
+        cats = self._config.categories
+        return [
+            p for p in self._providers.values()
+            if self._enabled.get(p.name, True) and p.category in cats
+        ]
+
+    @staticmethod
+    def _provider_url(p: "Provider") -> str:
+        return (
+            getattr(p, "url", None)
+            or getattr(p, "CHAT_URL", None)
+            or ""
         )
 
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "min_interval": self.min_interval,
-            "max_interval": self.max_interval,
-            "burst_probability": self.burst_probability,
-            "burst_min_size": self.burst_min_size,
-            "burst_max_size": self.burst_max_size,
-            "burst_gap_min": self.burst_gap_min,
-            "burst_gap_max": self.burst_gap_max,
-        }
+    @staticmethod
+    def _provider_method(p: "Provider") -> str:
+        return getattr(p, "method", "GET")
 
-    def update_from(self, data: dict[str, Any]) -> list[str]:
-        """Apply partial update; return list of changed fields.
+    def targets_snapshot(self) -> list[dict]:
+        return [
+            {
+                "name": p.name,
+                "category": p.category,
+                "enabled": self._enabled.get(p.name, True),
+                "count": self.per_target_count.get(p.name, 0),
+                "last_status": self.per_target_last_status.get(p.name),
+                "url": self._provider_url(p),
+                "method": self._provider_method(p),
+            }
+            for p in self._providers.values()
+        ]
 
-        Raises ``ValueError`` on invalid values. Cross-field invariants are
-        checked after individual field validation.
-        """
-        changed: list[str] = []
+    # ------------------------------------------------------------------
+    # Events: fan-out + ring buffer
+    # ------------------------------------------------------------------
 
-        def set_float(key: str, lo: float, hi: float) -> None:
-            if key in data and data[key] is not None:
-                v = float(data[key])
-                if not (lo <= v <= hi):
-                    raise ValueError(f"{key} must be in [{lo}, {hi}]")
-                if v != getattr(self, key):
-                    setattr(self, key, v)
-                    changed.append(key)
-
-        def set_int(key: str, lo: int, hi: int) -> None:
-            if key in data and data[key] is not None:
-                v = int(data[key])
-                if not (lo <= v <= hi):
-                    raise ValueError(f"{key} must be in [{lo}, {hi}]")
-                if v != getattr(self, key):
-                    setattr(self, key, v)
-                    changed.append(key)
-
-        set_float("min_interval", 0.1, 3600.0)
-        set_float("max_interval", 0.1, 3600.0)
-        set_float("burst_probability", 0.0, 1.0)
-        set_int("burst_min_size", 1, 50)
-        set_int("burst_max_size", 1, 50)
-        set_float("burst_gap_min", 0.0, 60.0)
-        set_float("burst_gap_max", 0.0, 60.0)
-
-        if self.min_interval > self.max_interval:
-            raise ValueError("min_interval cannot exceed max_interval")
-        if self.burst_min_size > self.burst_max_size:
-            raise ValueError("burst_min_size cannot exceed burst_max_size")
-        if self.burst_gap_min > self.burst_gap_max:
-            raise ValueError("burst_gap_min cannot exceed burst_gap_max")
-
-        return changed
-
-
-# ---------------------------------------------------------------------------
-# Health / counters
-# ---------------------------------------------------------------------------
-
-@dataclass
-class HealthState:
-    started_at: float = field(default_factory=time.time)
-    last_tick_at: float | None = None
-    total_requests: int = 0
-    total_ok: int = 0
-    total_errors: int = 0
-    per_category: dict[str, int] = field(default_factory=dict)
-    per_target: dict[str, int] = field(default_factory=dict)
-    per_target_last_status: dict[str, int | None] = field(default_factory=dict)
-    per_target_last_ok: dict[str, bool] = field(default_factory=dict)
-
-    def record(self, category: str, name: str, ok: bool, status: int | None) -> None:
+    def publish_result(self, event: dict) -> None:
+        """Record one provider result and broadcast to SSE subscribers."""
         self.last_tick_at = time.time()
         self.total_requests += 1
-        if ok:
+        if event.get("ok"):
             self.total_ok += 1
         else:
             self.total_errors += 1
-        self.per_category[category] = self.per_category.get(category, 0) + 1
-        self.per_target[name] = self.per_target.get(name, 0) + 1
-        self.per_target_last_status[name] = status
-        self.per_target_last_ok[name] = ok
 
-    def snapshot(self) -> dict[str, Any]:
+        cat = event.get("category", "unknown")
+        name = event.get("target", "unknown")
+        self.per_category[cat] = self.per_category.get(cat, 0) + 1
+        self.per_target_count[name] = self.per_target_count.get(name, 0) + 1
+        self.per_target_last_status[name] = event.get("status")
+
+        stamped = {"ts": self.last_tick_at, **event}
+        self._buffer.append(stamped)
+
+        dead: list[asyncio.Queue] = []
+        for q in self._subs:
+            try:
+                q.put_nowait(stamped)
+            except asyncio.QueueFull:
+                # Slow consumer — drop silently; they'll catch up next event.
+                pass
+            except Exception:
+                dead.append(q)
+        for q in dead:
+            self._subs.discard(q)
+
+    def recent_events(self, limit: int = 200) -> list[dict]:
+        if limit <= 0:
+            return []
+        buf = list(self._buffer)
+        return buf[-limit:] if len(buf) > limit else buf
+
+    def subscribe(self) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue(maxsize=200)
+        self._subs.add(q)
+        return q
+
+    def unsubscribe(self, q: asyncio.Queue) -> None:
+        self._subs.discard(q)
+
+    # ------------------------------------------------------------------
+    # Snapshot for /metrics and /api/status
+    # ------------------------------------------------------------------
+
+    def stats_snapshot(self) -> dict:
         now = time.time()
         return {
             "uptime_seconds": round(now - self.started_at, 1),
@@ -139,112 +264,17 @@ class HealthState:
                 round(now - self.last_tick_at, 1)
                 if self.last_tick_at is not None else None
             ),
+            "scheduler_running": self.is_running(),
             "total_requests": self.total_requests,
             "total_ok": self.total_ok,
             "total_errors": self.total_errors,
             "per_category": dict(self.per_category),
             "per_target": dict(
-                sorted(self.per_target.items(), key=lambda kv: -kv[1])
+                sorted(self.per_target_count.items(), key=lambda kv: -kv[1])
             ),
+            "total_targets": len(self._providers),
+            "enabled_targets": sum(
+                1 for flag in self._enabled.values() if flag
+            ),
+            "subscribers": len(self._subs),
         }
-
-
-# ---------------------------------------------------------------------------
-# Umbrella run state
-# ---------------------------------------------------------------------------
-
-class RunState:
-    """Shared, mutable runtime state held by scheduler and web server."""
-
-    EVENT_RING_SIZE = 500
-    SSE_QUEUE_SIZE = 200
-    FIRE_QUEUE_SIZE = 100
-
-    def __init__(self, cfg: Config, providers: list) -> None:
-        self.static_cfg = cfg
-        self.providers = providers
-        self.providers_by_name: dict[str, Any] = {p.name: p for p in providers}
-
-        self.runtime_cfg = RuntimeConfig.from_config(cfg)
-        self.health = HealthState()
-
-        # Everything enabled out of the gate.
-        self.enabled_targets: Set[str] = {p.name for p in providers}
-        self.enabled_categories: Set[str] = set(cfg.categories)
-
-        # Pause is represented as an asyncio.Event so the scheduler can
-        # cheaply block on it. Event "set" means running; "clear" means
-        # paused.
-        self.running = asyncio.Event()
-        self.running.set()
-
-        # Manual fires: the UI enqueues a provider name, a worker task
-        # pulls from this queue and runs it out-of-band of the scheduler.
-        self.manual_fire_queue: asyncio.Queue[str] = asyncio.Queue(
-            maxsize=self.FIRE_QUEUE_SIZE
-        )
-
-        # Event ring + SSE fan-out.
-        self.event_ring: Deque[dict[str, Any]] = collections.deque(
-            maxlen=self.EVENT_RING_SIZE
-        )
-        self.sse_subscribers: Set[asyncio.Queue] = set()
-
-    # ----- pause / resume -----
-
-    @property
-    def paused(self) -> bool:
-        return not self.running.is_set()
-
-    def pause(self) -> None:
-        self.running.clear()
-
-    def resume(self) -> None:
-        self.running.set()
-
-    # ----- enabled-set helpers -----
-
-    def is_target_enabled(self, name: str) -> bool:
-        provider = self.providers_by_name.get(name)
-        if provider is None:
-            return False
-        return (
-            name in self.enabled_targets
-            and provider.category in self.enabled_categories
-        )
-
-    def enabled_providers(self) -> list:
-        return [p for p in self.providers if self.is_target_enabled(p.name)]
-
-    def set_target_enabled(self, name: str, enabled: bool) -> None:
-        if enabled:
-            self.enabled_targets.add(name)
-        else:
-            self.enabled_targets.discard(name)
-
-    def set_category_enabled(self, category: str, enabled: bool) -> None:
-        if enabled:
-            self.enabled_categories.add(category)
-        else:
-            self.enabled_categories.discard(category)
-
-    # ----- event broadcast -----
-
-    def record_event(self, event: dict[str, Any]) -> None:
-        self.event_ring.append(event)
-        dead: list[asyncio.Queue] = []
-        for q in self.sse_subscribers:
-            try:
-                q.put_nowait(event)
-            except asyncio.QueueFull:
-                dead.append(q)
-        for q in dead:
-            self.sse_subscribers.discard(q)
-
-    def subscribe(self) -> asyncio.Queue:
-        q: asyncio.Queue = asyncio.Queue(maxsize=self.SSE_QUEUE_SIZE)
-        self.sse_subscribers.add(q)
-        return q
-
-    def unsubscribe(self, q: asyncio.Queue) -> None:
-        self.sse_subscribers.discard(q)

@@ -55,16 +55,64 @@ docker compose up -d
 docker compose logs -f
 ```
 
-Health + metrics:
+Health, metrics, and the web UI:
 
 ```bash
+# Web UI
+open http://<debian-host-ip>:8090/        # or http://127.0.0.1:8090
+
+# Legacy / scraper-friendly endpoints
 curl -s http://127.0.0.1:8090/healthz
 curl -s http://127.0.0.1:8090/metrics | jq
 ```
 
 The container listens on port 8080 internally. The host-side port is
-controlled by `HEALTH_HOST_PORT` in `.env` (default `8090`) because
-`8080` is frequently owned by cadvisor or similar monitoring stacks.
+controlled by `HEALTH_HOST_PORT` in `.env` (default `8090`) and the
+bind address by `HEALTH_BIND` (default `0.0.0.0` for LAN access). Set
+`HEALTH_BIND=127.0.0.1` if you want loopback-only.
+
+## Web UI
+
+The UI is a single-page dashboard served from the same port as the
+API. **There is no authentication** — it assumes you're running it on
+a trusted LAN or behind your SASE fabric, and there's a visible banner
+to that effect.
+
+Features:
+
+- **Live log stream** via server-sent events. Filter by category,
+  HTTP status class, or free-text search. Pause auto-scroll and export
+  recent events as NDJSON.
+- **Stats panel** with total / ok / error counters and a per-category
+  distribution bar.
+- **Live config controls** — move a slider or tick a category and the
+  change is applied to the next scheduler iteration. No restart.
+- **Targets table** of all 58 providers with per-target enable/disable
+  toggle, hit count, last HTTP status, and a **fire** button to send a
+  one-shot request right now (result surfaces in the live log under the
+  `manual` source tag).
+- **TX / STANDBY** indicator and a global **Pause/Resume** button for
+  the scheduler loop.
+
+## HTTP API
+
+All endpoints return JSON unless noted.
+
+| Method         | Path                                 | Purpose                                         |
+|----------------|--------------------------------------|-------------------------------------------------|
+| `GET`          | `/`                                  | Web UI                                          |
+| `GET`          | `/healthz`                           | Plain-text `ok` for Docker HEALTHCHECK          |
+| `GET`          | `/metrics`                           | Aggregate counters snapshot                     |
+| `GET`          | `/api/status`                        | `/metrics` + current config                     |
+| `GET`          | `/api/config`                        | Current live-tunable config                     |
+| `PATCH`/`POST` | `/api/config`                        | Partial update; unknown fields are ignored      |
+| `GET`          | `/api/targets`                       | List of all providers with enabled state        |
+| `POST`         | `/api/targets/{name}/toggle`         | Body: `{"enabled": true/false}` (optional)      |
+| `POST`         | `/api/targets/{name}/fire`           | Fire a one-shot request (async; 202 response)   |
+| `POST`         | `/api/scheduler/pause`               | Pause the scheduler loop                        |
+| `POST`         | `/api/scheduler/resume`              | Resume                                          |
+| `GET`          | `/api/events?limit=N`                | Recent events (ring buffer, max 1000)           |
+| `GET`          | `/api/events/stream`                 | Server-sent events: live event stream           |
 
 ## Running under systemd
 
