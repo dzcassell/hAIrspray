@@ -264,6 +264,67 @@
 
   .btn.small { padding: 3px 10px; font-size: 10px; }
 
+  /* Danger variant — red phosphor, subtle glow. Used for FIRE ALL
+     and Cancel. Deliberately menacing so it's not pressed by accident. */
+  .btn.danger {
+    border-color: #5a1d1d;
+    color: #ff6a5e;
+    background: linear-gradient(180deg, #1c0a0a 0%, #130606 100%);
+    text-shadow: 0 0 4px rgba(232,104,94,0.35);
+  }
+  .btn.danger:hover {
+    border-color: #ff6a5e;
+    color: #ffb4ac;
+    background: linear-gradient(180deg, #2a0d0d 0%, #1a0808 100%);
+    box-shadow: 0 0 0 1px rgba(232,104,94,0.25), 0 0 10px rgba(232,104,94,0.15);
+  }
+
+  /* Fire-all progress strip, shown only while a fire-all run is active. */
+  .fire-all-bar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 14px;
+    background: linear-gradient(90deg, rgba(232,104,94,0.10), rgba(232,104,94,0.02) 70%);
+    border-top: 1px solid #3a1414;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+  }
+  .fire-all-bar .fa-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--err);
+    box-shadow: 0 0 8px rgba(232,104,94,0.6);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  .fire-all-bar .fa-label {
+    font-weight: 700; letter-spacing: 0.18em; color: var(--err);
+    text-transform: uppercase;
+  }
+  .fire-all-bar .fa-current {
+    color: var(--text);
+    max-width: 320px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .fire-all-bar .fa-track {
+    flex: 0 0 220px;
+    height: 4px;
+    background: var(--chassis-deep);
+    border: 1px solid var(--border);
+    border-radius: 1px;
+    overflow: hidden;
+  }
+  .fire-all-bar .fa-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #5a1d1d, var(--err));
+    box-shadow: 0 0 6px rgba(232,104,94,0.5);
+    width: 0%;
+    transition: width 180ms linear;
+  }
+  .fire-all-bar.done .fa-dot {
+    background: var(--ok); animation: none;
+    box-shadow: 0 0 6px rgba(143,211,106,0.5);
+  }
+  .fire-all-bar.done .fa-label { color: var(--ok); }
+
   #pause-btn {
     min-width: 80px;
   }
@@ -835,6 +896,18 @@
       </select>
       <button class="btn small" id="tgt-enable-all">Enable all</button>
       <button class="btn small" id="tgt-disable-all">Disable all</button>
+      <span class="sep" style="margin:0 2px;">│</span>
+      <button class="btn small" id="tgt-fire-channel" title="fire every enabled target in the selected channel">Fire Channel</button>
+      <button class="btn small danger" id="tgt-fire-all" title="fire every enabled target once, concurrency-capped">⚡ Fire All</button>
+    </div>
+    <div class="fire-all-bar" id="fa-bar" hidden>
+      <span class="fa-dot"></span>
+      <span class="fa-label">FIRE-ALL</span>
+      <span class="fa-current mono" id="fa-current">—</span>
+      <span class="grow"></span>
+      <span class="mono fade" id="fa-stats">0 / 0</span>
+      <div class="fa-track"><div class="fa-fill" id="fa-fill"></div></div>
+      <button class="btn small danger" id="fa-cancel">Cancel</button>
     </div>
     <div class="targets-scroll">
       <table class="targets-table">
@@ -1128,6 +1201,11 @@ async function refreshStatus() {
     S.config = data.config;
     renderStats();
     renderConfig();
+    if (data.fire_all) {
+      renderFireAll(data.fire_all);
+      // If a run is active but the fast poller isn't running, start it.
+      if (data.fire_all.running && !_faPollTimer) ensureFireAllPoller(true);
+    }
   } catch (e) {}
 }
 async function refreshTargets() {
@@ -1248,7 +1326,117 @@ function bindTargetControls() {
   $("#tgt-shown").addEventListener("change", e => { S.tgtFilters.shown = e.target.value; renderTargets(); });
   $("#tgt-enable-all").addEventListener("click", () => bulkEnable(true));
   $("#tgt-disable-all").addEventListener("click", () => bulkEnable(false));
+  $("#tgt-fire-all").addEventListener("click", () => startFireAll({scope: "enabled"}));
+  $("#tgt-fire-channel").addEventListener("click", () => {
+    const cat = S.tgtFilters.cat;
+    if (!cat) {
+      alert("Pick a channel from the dropdown first, then press Fire Channel.");
+      return;
+    }
+    startFireAll({scope: "enabled", category: cat});
+  });
+  $("#fa-cancel").addEventListener("click", cancelFireAll);
 }
+
+// ---------- fire-all ----------
+async function startFireAll(opts) {
+  const body = Object.assign({
+    scope: "enabled",
+    concurrency: 10,
+    gap_min_sec: 0.1,
+    gap_max_sec: 0.3,
+  }, opts || {});
+  try {
+    const r = await fetch("/api/fire-all", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (r.status === 409) {
+      alert("A fire-all run is already in progress.");
+      return;
+    }
+    if (!r.ok) {
+      alert("Fire-all rejected: " + (data.error || r.status));
+      return;
+    }
+    // Immediately reflect the new state so the user doesn't wait on
+    // the poller.
+    renderFireAll({
+      running: true, total: data.total, done: 0,
+      current: null, concurrency: data.concurrency,
+      elapsed_seconds: 0, cancelling: false,
+    });
+    // Crank up poll rate while a run is active.
+    ensureFireAllPoller(true);
+  } catch (e) {
+    alert("Fire-all request failed: " + e);
+  }
+}
+
+async function cancelFireAll() {
+  try { await fetch("/api/fire-all/cancel", {method: "POST"}); } catch {}
+}
+
+let _faPollTimer = null;
+let _faLastTerminal = false;
+function ensureFireAllPoller(fast) {
+  if (_faPollTimer) clearInterval(_faPollTimer);
+  _faPollTimer = setInterval(async () => {
+    try {
+      const snap = await apiGet("/api/fire-all/status");
+      renderFireAll(snap);
+      // Ease off to a slow heartbeat once idle to save requests.
+      if (!snap.running && _faLastTerminal) {
+        clearInterval(_faPollTimer); _faPollTimer = null;
+      }
+      _faLastTerminal = !snap.running;
+    } catch { /* keep polling */ }
+  }, fast ? 500 : 1500);
+}
+
+function renderFireAll(snap) {
+  const bar = $("#fa-bar");
+  if (!snap || (!snap.running && !snap.total)) {
+    bar.hidden = true;
+    bar.classList.remove("done");
+    return;
+  }
+  bar.hidden = false;
+
+  const total = snap.total || 0;
+  const done  = snap.done  || 0;
+  const pct   = total > 0 ? (done / total) * 100 : 0;
+  $("#fa-fill").style.width = pct.toFixed(1) + "%";
+
+  const stats = `${done} / ${total} · ${snap.elapsed_seconds || 0}s`
+    + (snap.concurrency ? ` · ×${snap.concurrency}` : "");
+  $("#fa-stats").textContent = stats;
+
+  const cur = snap.current || (snap.running ? "launching…" : "done");
+  $("#fa-current").textContent = cur;
+
+  $("#fa-cancel").disabled = !snap.running || snap.cancelling;
+  $("#fa-cancel").textContent = snap.cancelling ? "Cancelling…" : "Cancel";
+
+  if (!snap.running) {
+    bar.classList.add("done");
+    // Auto-hide a few seconds after a run ends so the UI doesn't stay
+    // cluttered, unless another run has started in the meantime.
+    clearTimeout(renderFireAll._hideTimer);
+    renderFireAll._hideTimer = setTimeout(() => {
+      if (!S.stats || !S.stats.fire_all || !S.stats.fire_all.running) {
+        bar.hidden = true;
+        bar.classList.remove("done");
+      }
+    }, 8000);
+  } else {
+    bar.classList.remove("done");
+    clearTimeout(renderFireAll._hideTimer);
+  }
+}
+
 function bindLogControls() {
   $("#log-search").addEventListener("input", e => { S.logFilters.q = e.target.value; rerenderLog(); });
   $("#log-cat").addEventListener("change",  e => { S.logFilters.cat = e.target.value; rerenderLog(); });

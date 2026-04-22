@@ -197,6 +197,169 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
         )
         return JSONResponse({"name": name, "fired": True}, status_code=202)
 
+    # ------------------ Fire all ------------------
+    #
+    # Runs one request per selected target using a bounded concurrency
+    # pool (default 10). Ten parallel flights finishes a full 161-target
+    # spray in ~30 s while staying well under any reasonable Cloudflare
+    # WAF threshold that might briefly affect co-tenant containers on
+    # the same outbound IP. Only one fire-all job runs at a time; a
+    # second call while one is in progress returns 409.
+    #
+    # Selection rules (any combination may be supplied in the POST body):
+    #   * "scope": "enabled" (default) | "all"
+    #     - "enabled" honors the per-target toggles and the channel
+    #        checkboxes (same set the scheduler picks from).
+    #     - "all" ignores all toggles and fires every known target.
+    #   * "category": "llm_api" etc. — restrict to one channel.
+    #   * "names": explicit list of provider names; overrides everything
+    #     else.
+    #   * "concurrency": max in-flight requests (default 10, hard cap 32).
+    #   * "gap_min_sec" / "gap_max_sec": minimum launch spacing between
+    #     new requests starting (default 0.1 → 0.3). Keeps the initial
+    #     burst from arriving as a single TCP fan-out blip.
+
+    async def _fire_all_runner(
+        targets: list,
+        concurrency: int,
+        gap_min: float,
+        gap_max: float,
+        source: str,
+    ) -> None:
+        import random
+        rng = random.Random()
+        total = len(targets)
+        sem = asyncio.Semaphore(concurrency)
+        launched = 0
+        completed = 0
+
+        state.begin_fire_all(
+            total=total, source=source, concurrency=concurrency,
+        )
+        log.info(
+            "fire_all_started",
+            total=total, concurrency=concurrency, source=source,
+        )
+
+        async def _one(provider) -> None:
+            nonlocal completed
+            async with sem:
+                if state.fire_all_cancel_requested():
+                    return
+                state.update_fire_all_current(provider.name)
+                await run_and_publish(provider, client, state, source=source)
+                completed += 1
+                state.update_fire_all_progress(done=completed)
+
+        tasks: list[asyncio.Task] = []
+        try:
+            for provider in targets:
+                if state.fire_all_cancel_requested():
+                    log.info(
+                        "fire_all_cancelled_before_launch",
+                        launched=launched, total=total,
+                    )
+                    break
+                tasks.append(asyncio.create_task(_one(provider)))
+                launched += 1
+                # Small random stagger so the initial fan-out isn't a
+                # single tight burst at t=0.
+                if launched < total:
+                    gap = rng.uniform(gap_min, gap_max)
+                    try:
+                        await asyncio.wait_for(
+                            state.fire_all_cancel_event().wait(), timeout=gap
+                        )
+                    except asyncio.TimeoutError:
+                        pass
+
+            # Wait for all in-flight work to settle, even if we broke
+            # out of the launch loop due to cancel.
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            state.end_fire_all()
+            log.info(
+                "fire_all_finished",
+                completed=completed, launched=launched, total=total,
+            )
+
+    async def fire_all(request: Request) -> Response:
+        if state.fire_all_running():
+            return JSONResponse(
+                {"error": "fire-all already in progress",
+                 "progress": state.fire_all_snapshot()},
+                status_code=409,
+            )
+
+        body: dict[str, Any] = {}
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            pass
+
+        scope = str(body.get("scope", "enabled")).lower()
+        category = body.get("category")
+        names = body.get("names")
+        concurrency = int(body.get("concurrency", 10))
+        concurrency = max(1, min(32, concurrency))
+        gap_min = float(body.get("gap_min_sec", 0.1))
+        gap_max = float(body.get("gap_max_sec", 0.3))
+        if gap_min < 0: gap_min = 0.0
+        if gap_max < gap_min: gap_max = gap_min
+
+        # Build the target list.
+        if names and isinstance(names, list):
+            providers = [
+                p for n in names
+                if (p := state.get_provider(str(n))) is not None
+            ]
+        elif scope == "all":
+            providers = list(state.all_providers())
+        else:
+            providers = state.eligible_providers()
+
+        if category:
+            providers = [p for p in providers if p.category == str(category)]
+
+        if not providers:
+            return JSONResponse(
+                {"error": "no targets matched selection"},
+                status_code=400,
+            )
+
+        # Shuffle so repeated fire-all runs produce different orderings
+        # and don't always hammer the same vendor first.
+        import random as _r
+        _r.shuffle(providers)
+
+        asyncio.create_task(
+            _fire_all_runner(
+                providers, concurrency, gap_min, gap_max, source="fire-all",
+            )
+        )
+        # With concurrency=C and per-request time ≈T_req, total ≈
+        # (T_req * N) / C + launch_gap * N; we don't know T_req so we
+        # return a rough wall-clock floor of launch_gap * N.
+        return JSONResponse(
+            {
+                "started": True,
+                "total": len(providers),
+                "concurrency": concurrency,
+                "launch_gap_sec": [gap_min, gap_max],
+            },
+            status_code=202,
+        )
+
+    async def fire_all_status(request: Request) -> Response:
+        return JSONResponse(state.fire_all_snapshot())
+
+    async def fire_all_cancel(request: Request) -> Response:
+        if not state.fire_all_running():
+            return JSONResponse({"running": False})
+        state.request_fire_all_cancel()
+        return JSONResponse({"cancelling": True})
+
     # ------------------ Scheduler control ------------------
 
     async def pause_scheduler(request: Request) -> Response:
@@ -258,6 +421,9 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
         Route("/api/targets", list_targets),
         Route("/api/targets/{name:path}/toggle", toggle_target, methods=["POST"]),
         Route("/api/targets/{name:path}/fire", fire_target, methods=["POST"]),
+        Route("/api/fire-all", fire_all, methods=["POST"]),
+        Route("/api/fire-all/status", fire_all_status),
+        Route("/api/fire-all/cancel", fire_all_cancel, methods=["POST"]),
         Route("/api/scheduler/pause", pause_scheduler, methods=["POST"]),
         Route("/api/scheduler/resume", resume_scheduler, methods=["POST"]),
         Route("/api/events", recent_events),

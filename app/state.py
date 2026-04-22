@@ -65,6 +65,16 @@ class AppState:
 
         self._cfg_lock = asyncio.Lock()
 
+        # Fire-all tracking
+        self._fa_running: bool = False
+        self._fa_source: str = ""
+        self._fa_total: int = 0
+        self._fa_done: int = 0
+        self._fa_current: str | None = None
+        self._fa_concurrency: int = 1
+        self._fa_started_at: float | None = None
+        self._fa_cancel: asyncio.Event = asyncio.Event()
+
     # ------------------------------------------------------------------
     # Config
     # ------------------------------------------------------------------
@@ -253,6 +263,63 @@ class AppState:
         self._subs.discard(q)
 
     # ------------------------------------------------------------------
+    # Fire-all coordination
+    # ------------------------------------------------------------------
+
+    def fire_all_running(self) -> bool:
+        return self._fa_running
+
+    def fire_all_cancel_event(self) -> asyncio.Event:
+        return self._fa_cancel
+
+    def fire_all_cancel_requested(self) -> bool:
+        return self._fa_cancel.is_set()
+
+    def request_fire_all_cancel(self) -> None:
+        self._fa_cancel.set()
+
+    def begin_fire_all(
+        self, total: int, source: str, concurrency: int = 1,
+    ) -> None:
+        self._fa_running = True
+        self._fa_source = source
+        self._fa_total = total
+        self._fa_done = 0
+        self._fa_current = None
+        self._fa_concurrency = concurrency
+        self._fa_started_at = time.time()
+        self._fa_cancel = asyncio.Event()
+
+    def update_fire_all_progress(self, done: int) -> None:
+        self._fa_done = done
+
+    def update_fire_all_current(self, current: str | None) -> None:
+        # With concurrency>1 this is just "most recently launched".
+        self._fa_current = current
+
+    def end_fire_all(self) -> None:
+        self._fa_running = False
+        self._fa_current = None
+
+    def fire_all_snapshot(self) -> dict:
+        if not self._fa_running and self._fa_started_at is None:
+            return {"running": False}
+        elapsed = (
+            time.time() - self._fa_started_at
+            if self._fa_started_at is not None else 0.0
+        )
+        return {
+            "running": self._fa_running,
+            "source": self._fa_source,
+            "total": self._fa_total,
+            "done": self._fa_done,
+            "current": self._fa_current,
+            "concurrency": getattr(self, "_fa_concurrency", 1),
+            "elapsed_seconds": round(elapsed, 1),
+            "cancelling": self._fa_cancel.is_set(),
+        }
+
+    # ------------------------------------------------------------------
     # Snapshot for /metrics and /api/status
     # ------------------------------------------------------------------
 
@@ -277,4 +344,5 @@ class AppState:
                 1 for flag in self._enabled.values() if flag
             ),
             "subscribers": len(self._subs),
+            "fire_all": self.fire_all_snapshot(),
         }
