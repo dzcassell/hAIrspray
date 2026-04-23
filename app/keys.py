@@ -57,18 +57,33 @@ DEFAULT_KEYS_PATH = Path(os.environ.get(
     "AI_SPRAY_KEYS_PATH", "/data/keys.json"
 ))
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _FILE_MODE = 0o600
 _DIR_MODE = 0o700
 
 
 class KeyStore:
-    """Asynchronous, file-backed key store."""
+    """Asynchronous, file-backed key store.
+
+    Schema version 2 stores, per provider:
+      * ``keys[provider]`` — the raw API key string
+      * ``models[provider]`` — an object with ``models`` (a list of
+        model IDs discovered from the provider's /models endpoint)
+        and ``fetched_at`` (ISO-8601 timestamp). Missing or empty
+        means discovery hasn't run (or failed) — the caller should
+        fall back to the hard-coded defaults in KEYED_PROVIDERS.
+
+    Schema v1 files (keys only, no models) are read transparently; the
+    models dict simply starts empty and gets populated on first
+    discovery (typically when the user re-saves a key or clicks the
+    Refresh button in the UI).
+    """
 
     def __init__(self, path: Path = DEFAULT_KEYS_PATH):
         self._path = path
         self._lock = asyncio.Lock()
         self._keys: dict[str, str] = {}
+        self._models: dict[str, dict[str, Any]] = {}
         self._loaded = False
 
     # ------------------------------------------------------------------
@@ -79,22 +94,24 @@ class KeyStore:
         """Read the keys file from disk. Safe to call repeatedly; a
         successful load clears any in-memory state first."""
         async with self._lock:
-            self._keys = await asyncio.to_thread(self._load_sync)
+            keys, models = await asyncio.to_thread(self._load_sync)
+            self._keys = keys
+            self._models = models
             self._loaded = True
 
-    def _load_sync(self) -> dict[str, str]:
+    def _load_sync(self) -> tuple[dict[str, str], dict[str, dict[str, Any]]]:
         if not self._path.exists():
             log.info("no keys file at %s (fresh install)", self._path)
-            return {}
+            return {}, {}
 
         try:
             raw = self._path.read_text(encoding="utf-8")
         except OSError as e:
             log.error("cannot read keys file %s: %s", self._path, e)
-            return {}
+            return {}, {}
 
         if not raw.strip():
-            return {}
+            return {}, {}
 
         try:
             data = json.loads(raw)
@@ -104,30 +121,54 @@ class KeyStore:
                 "fix or delete the file to recover",
                 self._path, e,
             )
-            return {}
+            return {}, {}
 
         if not isinstance(data, dict):
             log.error("keys file root is not an object; ignoring")
-            return {}
+            return {}, {}
 
-        keys = data.get("keys", {})
-        if not isinstance(keys, dict):
-            return {}
+        # --- keys dict ---
+        raw_keys = data.get("keys", {})
+        clean_keys: dict[str, str] = {}
+        if isinstance(raw_keys, dict):
+            for prov, val in raw_keys.items():
+                if (isinstance(prov, str)
+                        and isinstance(val, str)
+                        and val.strip()):
+                    clean_keys[prov] = val.strip()
 
-        # Filter to string -> string only; silently drop other types.
-        clean: dict[str, str] = {}
-        for prov, val in keys.items():
-            if isinstance(prov, str) and isinstance(val, str) and val.strip():
-                clean[prov] = val.strip()
-        return clean
+        # --- models dict (only present in schema v2+; tolerate absent) ---
+        raw_models = data.get("models", {})
+        clean_models: dict[str, dict[str, Any]] = {}
+        if isinstance(raw_models, dict):
+            for prov, entry in raw_models.items():
+                if not isinstance(prov, str) or not isinstance(entry, dict):
+                    continue
+                models_list = entry.get("models")
+                fetched_at  = entry.get("fetched_at")
+                if not isinstance(models_list, list):
+                    continue
+                # Filter to strings only; drop anything weird.
+                mids = [m for m in models_list if isinstance(m, str)]
+                clean_models[prov] = {
+                    "models":     mids,
+                    "fetched_at": fetched_at if isinstance(fetched_at, str)
+                                  else None,
+                }
+
+        return clean_keys, clean_models
 
     async def _save_locked(self) -> None:
-        """Persist the in-memory dict. Caller must hold ``self._lock``."""
+        """Persist the in-memory state. Caller must hold ``self._lock``."""
         await asyncio.to_thread(self._save_sync)
 
     def _save_sync(self) -> None:
         payload = json.dumps(
-            {"version": _SCHEMA_VERSION, "keys": self._keys},
+            {
+                "version": _SCHEMA_VERSION,
+                "keys":    self._keys,
+                "models":  self._models,
+            },
             indent=2, sort_keys=True,
         ) + "\n"
 
@@ -176,46 +217,115 @@ class KeyStore:
             await self.load()
         return self._keys.get(provider)
 
+    async def _ensure_loaded_locked(self) -> None:
+        """Populate in-memory state from disk. Caller must hold the lock."""
+        if not self._loaded:
+            self._keys, self._models = await asyncio.to_thread(self._load_sync)
+            self._loaded = True
+
     async def set(self, provider: str, key: str) -> None:
         key = (key or "").strip()
         if not key:
             raise ValueError("key must be a non-empty string")
         async with self._lock:
-            if not self._loaded:
-                self._keys = await asyncio.to_thread(self._load_sync)
-                self._loaded = True
+            await self._ensure_loaded_locked()
             self._keys[provider] = key
             await self._save_locked()
         log.info("saved key for provider %s", provider)
 
     async def delete(self, provider: str) -> bool:
         async with self._lock:
-            if not self._loaded:
-                self._keys = await asyncio.to_thread(self._load_sync)
-                self._loaded = True
+            await self._ensure_loaded_locked()
             if provider not in self._keys:
                 return False
             del self._keys[provider]
+            # Also drop the cached models — they're provider-tied via
+            # the key, so a cleared key invalidates the catalog.
+            self._models.pop(provider, None)
             await self._save_locked()
         log.info("deleted key for provider %s", provider)
         return True
 
-    async def summary(self) -> dict[str, Any]:
-        """Non-sensitive summary: which providers have keys, with a
-        masked preview of each (first 4 + last 4 chars).
+    # ------------------------------------------------------------------
+    # Model catalog cache (populated by app/discovery.py)
+    # ------------------------------------------------------------------
 
-        Never returns full key values.
+    async def set_models(
+        self, provider: str, models: list[str],
+    ) -> None:
+        """Cache the discovered model catalog for a provider.
+
+        Empty lists are stored as-is — that's a valid result meaning
+        "discovery ran and found nothing". Callers that want to clear
+        the entry entirely (e.g. a discovery failure that shouldn't
+        overwrite a previously-good cache) should call
+        ``clear_models`` instead.
         """
+        async with self._lock:
+            await self._ensure_loaded_locked()
+            from datetime import datetime, timezone
+            self._models[provider] = {
+                "models":     [m for m in models if isinstance(m, str)],
+                "fetched_at": datetime.now(timezone.utc)
+                              .isoformat(timespec="seconds")
+                              .replace("+00:00", "Z"),
+            }
+            await self._save_locked()
+        log.info("cached %d models for provider %s",
+                 len(models), provider)
+
+    async def get_models(self, provider: str) -> list[str] | None:
+        """Return the cached model catalog, or None if we have no
+        successful discovery result for this provider."""
+        if not self._loaded:
+            await self.load()
+        entry = self._models.get(provider)
+        if not entry:
+            return None
+        return list(entry.get("models", []))
+
+    async def clear_models(self, provider: str) -> None:
+        """Drop the cached catalog for a provider without touching the
+        key itself. Used when a refresh fails and we want to force the
+        UI to fall back to hard-coded defaults rather than serve a
+        stale cache indefinitely."""
+        async with self._lock:
+            await self._ensure_loaded_locked()
+            self._models.pop(provider, None)
+            await self._save_locked()
+
+    # ------------------------------------------------------------------
+    # Summaries
+    # ------------------------------------------------------------------
+
+    async def summary(self) -> dict[str, Any]:
+        """Non-sensitive summary: which providers have keys + how
+        many models are cached. Never returns full key values."""
         if not self._loaded:
             await self.load()
         out: dict[str, dict[str, Any]] = {}
         for prov, val in self._keys.items():
+            m_entry = self._models.get(prov) or {}
             out[prov] = {
-                "present": True,
-                "preview": _mask(val),
-                "length": len(val),
+                "present":      True,
+                "preview":      _mask(val),
+                "length":       len(val),
+                "model_count":  len(m_entry.get("models") or []),
+                "fetched_at":   m_entry.get("fetched_at"),
             }
         return {"providers": out, "path": str(self._path)}
+
+    async def all_cached_models(self) -> dict[str, list[str]]:
+        """Return ``{provider: [model_id, ...]}`` for every provider
+        with a cached catalog. Used by the prompt-targets endpoint to
+        override the hard-coded defaults on a per-provider basis."""
+        if not self._loaded:
+            await self.load()
+        return {
+            prov: list(entry.get("models", []))
+            for prov, entry in self._models.items()
+            if entry.get("models")
+        }
 
 
 def _mask(v: str) -> str:

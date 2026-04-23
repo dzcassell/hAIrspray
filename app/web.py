@@ -43,6 +43,7 @@ from .prompt import (
     validate_target_id,
 )
 from .keys import KeyStore
+from . import discovery
 from .state import AppState
 
 log = structlog.get_logger()
@@ -445,46 +446,108 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
 
     async def prompt_targets(request: Request) -> Response:
         # Inject per-provider key presence so the UI can enable/disable
-        # keyed-provider checkboxes accordingly.
+        # keyed-provider checkboxes accordingly. Also pull the cached
+        # per-provider model catalogs (from dynamic discovery) so the
+        # UI renders whatever the provider's /models endpoint returned,
+        # not the hard-coded KEYED_PROVIDERS defaults.
         summary = await key_store.summary()
         presence = {
             prov: bool(v.get("present"))
             for prov, v in summary["providers"].items()
         }
-        return JSONResponse({"targets": targets_catalogue(presence)})
+        models_override = await key_store.all_cached_models()
+        return JSONResponse({
+            "targets": targets_catalogue(presence, models_override),
+        })
 
     # ------------------ Keys (persistent key store) ------------------
     #
     # GET /api/keys
     #   Returns a summary: which providers have keys, with masked
-    #   previews (never full values). Also returns the full list of
-    #   keyed providers (label + signup_url) so the UI can render the
-    #   Keys panel even before any key is set.
+    #   previews (never full values), plus the model_count discovered
+    #   for each (zero if discovery hasn't run or failed — the UI
+    #   falls back to hard-coded defaults).
     #
     # POST /api/keys/{provider}
     #   Body: {"key": "<raw-api-key>"}
-    #   Saves (or overwrites) the key for this provider. Provider must
-    #   be one of KEYED_PROVIDERS.
+    #   Saves the key for this provider, then immediately runs
+    #   catalog discovery (GET /v1/models or equivalent). The response
+    #   includes the updated summary so the UI can show the model
+    #   count without a separate fetch.
+    #
+    # POST /api/keys/{provider}/refresh
+    #   Re-runs catalog discovery for an existing key. Used by the
+    #   ↻ Refresh button in the UI when the user suspects a
+    #   provider's catalog has changed since the last save.
     #
     # DELETE /api/keys/{provider}
-    #   Removes the key for this provider.
-    #
-    # All three endpoints return the updated summary.
+    #   Removes the key AND the cached catalog for this provider.
+
+    def _provider_entry(provider: str) -> dict | None:
+        for p in KEYED_PROVIDERS:
+            if p["provider"] == provider:
+                return p
+        return None
+
+    async def _run_discovery_for(provider: str) -> tuple[bool, int, str | None]:
+        """Fetch the provider's model catalog with the current stored
+        key and cache the result.
+
+        Returns (success, model_count, error_message).
+        * success=True with model_count=N on a normal fetch.
+        * success=False with error_message when discovery failed;
+          the existing cache (if any) is left in place so the UI can
+          continue to show whatever was last good.
+        """
+        entry = _provider_entry(provider)
+        if entry is None:
+            return False, 0, f"unknown provider: {provider}"
+        api_key = await key_store.get(provider)
+        if not api_key:
+            return False, 0, "no key stored for this provider"
+
+        base_url = (entry.get("extra") or {}).get("base_url")
+        try:
+            models = await discovery.discover_models(
+                client, entry["shape"], base_url, api_key, timeout=10.0,
+            )
+        except Exception as e:
+            log.warning("discovery_unexpected_exception",
+                        provider=provider, err=str(e))
+            return False, 0, f"discovery raised: {type(e).__name__}"
+
+        if models is None:
+            # Discovery failed in a known way (non-200, parse error,
+            # transport error). The discovery module already logged.
+            return False, 0, ("discovery endpoint did not return a "
+                              "usable model list")
+        try:
+            await key_store.set_models(provider, models)
+        except OSError as e:
+            log.error("set_models_io_fail", provider=provider, err=str(e))
+            return False, 0, f"could not persist catalog: {e}"
+        return True, len(models), None
 
     async def keys_summary(request: Request) -> Response:
         summary = await key_store.summary()
         return JSONResponse({
             "providers": [
                 {
-                    "provider":   p["provider"],
-                    "label":      p["label"],
-                    "signup_url": p["signup_url"],
-                    "present":    bool(summary["providers"]
-                                       .get(p["provider"], {})
-                                       .get("present")),
-                    "preview":    (summary["providers"]
-                                   .get(p["provider"], {})
-                                   .get("preview")),
+                    "provider":    p["provider"],
+                    "label":       p["label"],
+                    "signup_url":  p["signup_url"],
+                    "present":     bool(summary["providers"]
+                                        .get(p["provider"], {})
+                                        .get("present")),
+                    "preview":     (summary["providers"]
+                                    .get(p["provider"], {})
+                                    .get("preview")),
+                    "model_count": (summary["providers"]
+                                    .get(p["provider"], {})
+                                    .get("model_count", 0)),
+                    "fetched_at":  (summary["providers"]
+                                    .get(p["provider"], {})
+                                    .get("fetched_at")),
                 }
                 for p in KEYED_PROVIDERS
             ],
@@ -493,7 +556,7 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
 
     async def keys_set(request: Request) -> Response:
         provider = request.path_params["provider"]
-        if not any(p["provider"] == provider for p in KEYED_PROVIDERS):
+        if _provider_entry(provider) is None:
             return JSONResponse(
                 {"error": f"unknown provider: {provider}"},
                 status_code=400,
@@ -516,11 +579,61 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
                 {"error": f"could not save key: {e}"},
                 status_code=500,
             )
-        return await keys_summary(request)
+
+        # Fire discovery synchronously. A 10s timeout is baked into
+        # discover_models, so worst case the POST returns in ~10s.
+        # If discovery fails, the key is still saved — the UI will
+        # fall back to the hard-coded defaults for this provider.
+        discovered_ok, count, err = await _run_discovery_for(provider)
+        log.info("keys_set_discovery",
+                 provider=provider, ok=discovered_ok,
+                 model_count=count, err=err)
+
+        # Return the updated summary plus a discovery outcome hint so
+        # the UI can show a toast if needed.
+        summary_resp = await keys_summary(request)
+        summary_body = json.loads(summary_resp.body)
+        summary_body["discovery"] = {
+            "provider":    provider,
+            "ok":          discovered_ok,
+            "model_count": count,
+            "error":       err,
+        }
+        return JSONResponse(summary_body)
+
+    async def keys_refresh(request: Request) -> Response:
+        """Re-run catalog discovery for an existing key. The ↻
+        Refresh button in the UI hits this."""
+        provider = request.path_params["provider"]
+        if _provider_entry(provider) is None:
+            return JSONResponse(
+                {"error": f"unknown provider: {provider}"},
+                status_code=400,
+            )
+        if not await key_store.has(provider):
+            return JSONResponse(
+                {"error": f"no key stored for {provider}"},
+                status_code=400,
+            )
+
+        discovered_ok, count, err = await _run_discovery_for(provider)
+        log.info("keys_refresh_discovery",
+                 provider=provider, ok=discovered_ok,
+                 model_count=count, err=err)
+
+        summary_resp = await keys_summary(request)
+        summary_body = json.loads(summary_resp.body)
+        summary_body["discovery"] = {
+            "provider":    provider,
+            "ok":          discovered_ok,
+            "model_count": count,
+            "error":       err,
+        }
+        return JSONResponse(summary_body)
 
     async def keys_delete(request: Request) -> Response:
         provider = request.path_params["provider"]
-        if not any(p["provider"] == provider for p in KEYED_PROVIDERS):
+        if _provider_entry(provider) is None:
             return JSONResponse(
                 {"error": f"unknown provider: {provider}"},
                 status_code=400,
@@ -744,6 +857,7 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
         Route("/api/keys", keys_summary),
         Route("/api/keys/{provider}", keys_set, methods=["POST"]),
         Route("/api/keys/{provider}", keys_delete, methods=["DELETE"]),
+        Route("/api/keys/{provider}/refresh", keys_refresh, methods=["POST"]),
     ]
 
     return Starlette(debug=False, routes=routes, on_startup=[on_startup])

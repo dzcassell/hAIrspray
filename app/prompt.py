@@ -109,8 +109,7 @@ KEYED_PROVIDERS: list[dict[str, Any]] = [
         "shape":    "openai-compatible",
         "host":     "api.groq.com",
         "extra":    {"base_url": "https://api.groq.com/openai/v1"},
-        "models":   ["llama-3.3-70b-versatile", "llama-3.1-8b-instant",
-                     "mixtral-8x7b-32768"],
+        "models":   ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
         "kind":     "text",
     },
     {
@@ -164,8 +163,9 @@ KEYED_PROVIDERS: list[dict[str, Any]] = [
         "shape":    "openai-compatible",
         "host":     "api.together.xyz",
         "extra":    {"base_url": "https://api.together.xyz/v1"},
-        "models":   ["meta-llama/Llama-3.3-70B-Instruct-Turbo",
-                     "mistralai/Mixtral-8x7B-Instruct-v0.1"],
+        # Mixtral-8x7B-Instruct-v0.1 was retired after Mistral pulled
+        # Mixtral hosting rights — removed.
+        "models":   ["meta-llama/Llama-3.3-70B-Instruct-Turbo"],
         "kind":     "text",
     },
     {
@@ -175,7 +175,10 @@ KEYED_PROVIDERS: list[dict[str, Any]] = [
         "shape":    "openai-compatible",
         "host":     "api.cerebras.ai",
         "extra":    {"base_url": "https://api.cerebras.ai/v1"},
-        "models":   ["llama3.1-70b", "llama3.1-8b", "llama-3.3-70b"],
+        # llama-3.3-70b (hyphenated) was never a Cerebras slug — their
+        # naming convention uses no dot-separator on the size.
+        # Discovery will populate the real catalog.
+        "models":   ["llama3.1-8b", "llama3.1-70b"],
         "kind":     "text",
     },
     {
@@ -185,8 +188,10 @@ KEYED_PROVIDERS: list[dict[str, Any]] = [
         "shape":    "openai-compatible",
         "host":     "api.sambanova.ai",
         "extra":    {"base_url": "https://api.sambanova.ai/v1"},
-        "models":   ["Meta-Llama-3.1-70B-Instruct",
-                     "Meta-Llama-3.1-8B-Instruct"],
+        # Llama 3.1 Instruct models were deprecated in the 2025 Samba
+        # sweep. Current catalog varies by account tier — leaving a
+        # placeholder that discovery replaces immediately.
+        "models":   ["Meta-Llama-3.3-70B-Instruct"],
         "kind":     "text",
     },
     {
@@ -217,7 +222,9 @@ KEYED_PROVIDERS: list[dict[str, Any]] = [
         "shape":    "openai-compatible",
         "host":     "api.x.ai",
         "extra":    {"base_url": "https://api.x.ai/v1"},
-        "models":   ["grok-2-latest", "grok-beta"],
+        # grok-2-latest and grok-beta were retired when Grok 3 shipped.
+        # Best-guess current slugs; discovery will correct them.
+        "models":   ["grok-3", "grok-3-mini"],
         "kind":     "text",
     },
     {
@@ -237,8 +244,8 @@ KEYED_PROVIDERS: list[dict[str, Any]] = [
         "shape":    "openai-compatible",
         "host":     "api.fireworks.ai",
         "extra":    {"base_url": "https://api.fireworks.ai/inference/v1"},
-        "models":   ["accounts/fireworks/models/llama-v3p3-70b-instruct",
-                     "accounts/fireworks/models/mixtral-8x7b-instruct"],
+        # Mixtral-8x7B retired for the same reason as Together.
+        "models":   ["accounts/fireworks/models/llama-v3p3-70b-instruct"],
         "kind":     "text",
     },
 ]
@@ -272,6 +279,7 @@ def target_id(provider: str, model: str) -> str:
 
 def targets_catalogue(
     key_presence: dict[str, bool] | None = None,
+    models_override: dict[str, list[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Shape returned from GET /api/prompt/targets.
 
@@ -279,8 +287,15 @@ def targets_catalogue(
     entries carry ``needs_key=True``, a ``signup_url``, and (if
     ``key_presence`` is supplied) a ``present`` flag the UI uses to
     decide whether the checkbox is enabled.
+
+    ``models_override`` lets callers (typically web.py, fed from the
+    KeyStore's cached catalog) substitute the hard-coded model lists
+    in ``KEYED_PROVIDERS`` with freshly-discovered ones. Only
+    providers with a non-empty override list are replaced; others
+    fall back to the KEYED_PROVIDERS defaults.
     """
     kp = key_presence or {}
+    mo = models_override or {}
     out: list[dict[str, Any]] = []
     # Keyless entries — always present, no key needed.
     for t in PROMPT_TARGETS:
@@ -293,18 +308,29 @@ def targets_catalogue(
             "needs_key": False,
             "present":   True,
         })
-    # Keyed entries — one per (provider, model) pair.
+    # Keyed entries — one per (provider, model) pair. If a discovered
+    # catalog exists for this provider, use it; otherwise use the
+    # hard-coded defaults.
     for p in KEYED_PROVIDERS:
-        for m in p["models"]:
+        provider = p["provider"]
+        discovered = mo.get(provider)
+        if discovered:
+            models = discovered
+            source = "discovered"
+        else:
+            models = p["models"]
+            source = "default"
+        for m in models:
             out.append({
-                "id":         target_id(p["provider"], m),
-                "provider":   p["provider"],
+                "id":         target_id(provider, m),
+                "provider":   provider,
                 "model":      m,
                 "kind":       p["kind"],
-                "label":      _display_label(p["provider"], m),
+                "label":      _display_label(provider, m),
                 "needs_key":  True,
                 "signup_url": p["signup_url"],
-                "present":    bool(kp.get(p["provider"], False)),
+                "present":    bool(kp.get(provider, False)),
+                "source":     source,
             })
     return out
 
@@ -831,24 +857,27 @@ def _extract_error_msg(raw_text: str) -> str | None:
 def validate_target_id(tid: str) -> dict[str, str] | None:
     """Return the target entry matching this id, or None.
 
-    Covers both keyless ``PROMPT_TARGETS`` and keyed provider×model
-    combinations. For keyed targets the returned dict has keys
-    ``{provider, model, kind, keyed: True}`` so the caller can
-    decide whether to look up an API key.
+    Covers both keyless ``PROMPT_TARGETS`` (strict match) and keyed
+    provider×model combinations. For keyed targets, only the provider
+    half has to match a known ``KEYED_PROVIDERS`` entry — the model
+    half is accepted as-is, because dynamic discovery means the
+    catalog the UI renders at any given moment is a superset of the
+    hard-coded defaults, and we mustn't reject a model that /models
+    legitimately returned.
     """
     for t in PROMPT_TARGETS:
         if target_id(t["provider"], t["model"]) == tid:
             return t
-    # Look through keyed providers.
-    for p in KEYED_PROVIDERS:
-        for m in p["models"]:
-            if target_id(p["provider"], m) == tid:
-                return {
-                    "provider": p["provider"],
-                    "model":    m,
-                    "kind":     p["kind"],
-                    "keyed":    True,
-                }
+    if "::" in tid:
+        provider, _, model = tid.partition("::")
+        entry = _keyed_entry(provider)
+        if entry is not None and model:
+            return {
+                "provider": provider,
+                "model":    model,
+                "kind":     entry["kind"],
+                "keyed":    True,
+            }
     return None
 
 

@@ -591,6 +591,20 @@
     border-radius: 2px;
     background: rgba(143,211,106,.06);
   }
+  .key-row .key-model-count {
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--cyan);
+    padding: 3px 6px;
+    border: 1px solid #1a3a38;
+    border-radius: 2px;
+    background: rgba(89,200,200,.06);
+  }
+  .key-row .key-model-count.fade {
+    color: var(--text-dim);
+    border-color: var(--border);
+    background: transparent;
+  }
   .key-row .key-actions {
     display: flex; gap: 6px;
   }
@@ -2388,7 +2402,49 @@ const KeysUI = (() => {
       }
     });
 
-    const actions = el("div", {class: "key-actions"}, [saveBtn, clearBtn]);
+    // ↻ Refresh button — re-runs the provider's /models discovery
+    // with the stored key. Only enabled when a key is present.
+    const refreshBtn = el("button", {
+      class: "btn small", title: "re-fetch this provider's model catalog",
+    }, "↻");
+    refreshBtn.disabled = !p.present;
+    refreshBtn.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      if (!p.present) return;
+      refreshBtn.disabled = true;
+      const orig = refreshBtn.textContent;
+      refreshBtn.textContent = "…";
+      try {
+        const r = await fetch(
+          `/api/keys/${encodeURIComponent(p.provider)}/refresh`,
+          {method: "POST"}
+        );
+        if (!r.ok) {
+          let msg = "HTTP " + r.status;
+          try { const j = await r.json(); if (j.error) msg = j.error; } catch {}
+          setRowFlash(refreshBtn, msg, true);
+        } else {
+          const body = await r.json();
+          const d = body.discovery || {};
+          if (d.ok) {
+            setRowFlash(refreshBtn, `✓ ${d.model_count} models`, false);
+          } else {
+            setRowFlash(refreshBtn,
+              d.error ? d.error.slice(0, 30) : "discovery failed", true);
+          }
+          await load();
+          await PromptUI.reload();
+        }
+      } catch (e) {
+        setRowFlash(refreshBtn, String(e), true);
+      } finally {
+        refreshBtn.textContent = orig;
+        refreshBtn.disabled = !p.present;
+      }
+    });
+
+    const actions = el("div", {class: "key-actions"},
+                       [saveBtn, refreshBtn, clearBtn]);
 
     const link = el("a", {
       href: p.signup_url,
@@ -2399,6 +2455,16 @@ const KeysUI = (() => {
     if (p.present && p.preview) {
       metaChildren.push(document.createTextNode(" · "));
       metaChildren.push(el("span", {class: "key-preview"}, p.preview));
+    }
+    // Show discovered model count if we have one.
+    if (p.present && p.model_count > 0) {
+      metaChildren.push(document.createTextNode(" · "));
+      metaChildren.push(el("span", {class: "key-model-count"},
+                            `${p.model_count} models`));
+    } else if (p.present) {
+      metaChildren.push(document.createTextNode(" · "));
+      metaChildren.push(el("span", {class: "key-model-count fade"},
+                            "no catalog yet — click ↻"));
     }
 
     const labelDiv = el("div", {class: "key-label"}, [
