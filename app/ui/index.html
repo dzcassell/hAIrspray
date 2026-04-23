@@ -11,7 +11,7 @@
 
 <style>
   /* ==============================================================
-     ai-spray — a traffic generator dressed as a desk-mount rack unit
+     ai-spray control panel
      ============================================================== */
 
   :root {
@@ -199,19 +199,19 @@
     background: var(--dim);
     display: inline-block;
   }
-  .pill.tx {
+  .pill.running {
     color: var(--amber);
     border-color: var(--amber-deep);
     background: rgba(255,169,77,.06);
     text-shadow: 0 0 8px var(--amber-glow);
   }
-  .pill.tx .dot {
+  .pill.running .dot {
     background: var(--amber);
     box-shadow: 0 0 10px var(--amber-glow), 0 0 2px var(--amber-bright);
-    animation: pulse-tx 1.4s ease-in-out infinite;
+    animation: pulse-dot 1.4s ease-in-out infinite;
   }
-  .pill.standby { color: var(--text-dim); }
-  .pill.standby .dot { background: var(--text-faint); }
+  .pill.paused { color: var(--text-dim); }
+  .pill.paused .dot { background: var(--text-faint); }
 
   .pill.live {
     color: var(--ok);
@@ -229,7 +229,7 @@
   }
   .pill.dead .dot { background: var(--err); }
 
-  @keyframes pulse-tx {
+  @keyframes pulse-dot {
     0%, 100% { opacity: 1; }
     50%      { opacity: 0.35; }
   }
@@ -293,7 +293,7 @@
     width: 8px; height: 8px; border-radius: 50%;
     background: var(--err);
     box-shadow: 0 0 8px rgba(232,104,94,0.6);
-    animation: pulse 1.2s ease-in-out infinite;
+    animation: pulse-dot 1.2s ease-in-out infinite;
   }
   .fire-all-bar .fa-label {
     font-weight: 700; letter-spacing: 0.18em; color: var(--err);
@@ -807,12 +807,12 @@
 <header>
   <div class="wordmark">AI·SPRAY</div>
   <div class="meta">
-    <span>TRAFFIC GEN</span><span class="sep">·</span>
-    <span>58 TARGETS</span><span class="sep">·</span>
-    <span>5 CHANNELS</span>
+    <span>Traffic Generator</span><span class="sep">·</span>
+    <span><span id="meta-targets">—</span> targets</span><span class="sep">·</span>
+    <span><span id="meta-categories">—</span> categories</span>
   </div>
   <span class="grow"></span>
-  <span id="status-pill" class="pill standby"><span class="dot"></span><span class="label">STANDBY</span></span>
+  <span id="status-pill" class="pill paused"><span class="dot"></span><span class="label">PAUSED</span></span>
   <button id="pause-btn" class="btn">Pause</button>
   <div class="readouts">
     <span id="stream-pill" class="pill dead" title="SSE connection"><span class="dot"></span><span class="label">stream</span></span>
@@ -827,7 +827,7 @@
 <main>
 
   <section class="panel" id="stats-panel">
-    <div class="head">Flow Meter<span class="grow"></span><span class="fade" id="tick-age">—</span></div>
+    <div class="head">Stats<span class="grow"></span><span class="fade" id="tick-age">—</span></div>
     <div class="body">
       <div class="stats-grid">
         <div class="stat">    <div class="label">Total</div>  <div class="value" id="stat-total">0</div></div>
@@ -877,7 +877,7 @@
       </div>
 
       <div class="cat-section">
-        <div class="section-label">Channels</div>
+        <div class="section-label">Categories</div>
         <div class="checkbox-grid" id="cat-checks"></div>
       </div>
 
@@ -888,7 +888,7 @@
     <div class="head">Targets<span class="grow"></span><span class="fade" id="targets-summary">—</span></div>
     <div class="targets-controls">
       <input type="text" id="tgt-search" placeholder="filter by name or URL…" style="flex: 1 1 220px;">
-      <select id="tgt-cat"><option value="">all channels</option></select>
+      <select id="tgt-cat"><option value="">all categories</option></select>
       <select id="tgt-shown">
         <option value="all">all</option>
         <option value="enabled">enabled only</option>
@@ -897,7 +897,7 @@
       <button class="btn small" id="tgt-enable-all">Enable all</button>
       <button class="btn small" id="tgt-disable-all">Disable all</button>
       <span class="sep" style="margin:0 2px;">│</span>
-      <button class="btn small" id="tgt-fire-channel" title="fire every enabled target in the selected channel">Fire Channel</button>
+      <button class="btn small" id="tgt-fire-channel" title="fire every enabled target in the selected category">Fire Category</button>
       <button class="btn small danger" id="tgt-fire-all" title="fire every enabled target once, concurrency-capped">⚡ Fire All</button>
     </div>
     <div class="fire-all-bar" id="fa-bar" hidden>
@@ -915,7 +915,7 @@
           <tr>
             <th style="width: 48px;">on</th>
             <th>name</th>
-            <th>channel</th>
+            <th>category</th>
             <th>method</th>
             <th>url</th>
             <th style="text-align:right;">hits</th>
@@ -932,7 +932,7 @@
     <div class="head">Live Log<span class="grow"></span><span class="fade" id="log-count">0 events</span></div>
     <div class="log-controls">
       <input type="text" id="log-search" placeholder="filter…" style="flex: 1 1 220px;">
-      <select id="log-cat"><option value="">all channels</option></select>
+      <select id="log-cat"><option value="">all categories</option></select>
       <select id="log-status">
         <option value="">all statuses</option>
         <option value="2">2xx</option>
@@ -1048,13 +1048,24 @@ function renderStats() {
 
   const pill = $("#status-pill");
   if (S.stats.scheduler_running) {
-    pill.className = "pill tx";
-    pill.querySelector(".label").textContent = "TX";
+    pill.className = "pill running";
+    pill.querySelector(".label").textContent = "RUNNING";
     $("#pause-btn").textContent = "Pause";
   } else {
-    pill.className = "pill standby";
-    pill.querySelector(".label").textContent = "STANDBY";
+    pill.className = "pill paused";
+    pill.querySelector(".label").textContent = "PAUSED";
     $("#pause-btn").textContent = "Resume";
+  }
+
+  // Keep the header meta strip in sync with reality.
+  if (S.stats.total_targets != null) {
+    $("#meta-targets").textContent = S.stats.total_targets;
+  }
+  if (S.stats.per_category) {
+    // Prefer the authoritative category list from config when available;
+    // fall back to whatever's been observed.
+    const cats = (S.config && S.config.categories) || Object.keys(S.stats.per_category);
+    $("#meta-categories").textContent = cats.length;
   }
 }
 
@@ -1330,7 +1341,7 @@ function bindTargetControls() {
   $("#tgt-fire-channel").addEventListener("click", () => {
     const cat = S.tgtFilters.cat;
     if (!cat) {
-      alert("Pick a channel from the dropdown first, then press Fire Channel.");
+      alert("Pick a category from the dropdown first, then press Fire Category.");
       return;
     }
     startFireAll({scope: "enabled", category: cat});
