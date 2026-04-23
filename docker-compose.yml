@@ -1,8 +1,8 @@
 services:
-  ai-spray:
+  hairspray:
     build: .
-    image: ai-spray:latest
-    container_name: ai-spray
+    image: hairspray:latest
+    container_name: hairspray
     restart: unless-stopped
     env_file:
       - .env
@@ -16,6 +16,10 @@ services:
       # Persistent API key store for keyed prompt providers. Lives in
       # a named Docker volume so it survives container rebuilds. File
       # inside is plaintext JSON with mode 0600 — see app/keys.py.
+      #
+      # The volume name is kept as 'ai-spray-keys' for upgrade
+      # compatibility: renaming it would orphan any keys you already
+      # saved under the old project name.
       - ai-spray-keys:/data
     logging:
       driver: json-file

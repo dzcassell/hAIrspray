@@ -192,7 +192,7 @@ def _llm_api_probes() -> list[Provider]:
         # Cato sees the vendor-specific hostname pattern either way)
         ApiProbe(
             name="Azure-OpenAI",
-            url=("https://ai-spray-lab.openai.azure.com/openai/deployments/"
+            url=("https://hairspray-lab.openai.azure.com/openai/deployments/"
                  "gpt-4o-mini/chat/completions?api-version=2024-10-21"),
             user_agent="openai/1.58.0 azure",
             body_builder=chat_body("gpt-4o-mini"),

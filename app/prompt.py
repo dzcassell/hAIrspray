@@ -14,7 +14,7 @@ Two kinds of providers:
   Work out of the box, no account needed. Rate-limited by the upstream.
 * **Keyed** — Free-tier API endpoints from major LLM vendors. The user
   signs up on the vendor's site, gets a free API key, pastes it into
-  the ai-spray UI. Key is persisted to the key store and passed as
+  the hAIrspray UI. Key is persisted to the key store and passed as
   ``Authorization: Bearer`` (or vendor-specific header) on each
   request.
 
@@ -595,8 +595,8 @@ async def _run_keyed_openai_compatible(
     # OpenRouter asks for an identifying header for free-tier rankings.
     # Harmless on everywhere else.
     if entry["provider"] == "openrouter":
-        headers["HTTP-Referer"] = "https://github.com/dzcassell/ai-spray"
-        headers["X-Title"]      = "ai-spray"
+        headers["HTTP-Referer"] = "https://github.com/dzcassell/hAIrspray"
+        headers["X-Title"]      = "hAIrspray"
     body = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],

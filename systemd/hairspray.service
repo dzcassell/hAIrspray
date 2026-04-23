@@ -1,5 +1,5 @@
 [Unit]
-Description=AI Traffic Simulator (Cato app-ID lab)
+Description=hAIrspray — AI-application traffic generator for SASE/NGFW inspection testing
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
@@ -10,8 +10,8 @@ Restart=always
 RestartSec=10
 
 # Path to the project directory on the host. Adjust if you place it
-# elsewhere.
-WorkingDirectory=/opt/ai-spray
+# elsewhere (e.g. /opt/ai-spray if you haven't renamed the checkout yet).
+WorkingDirectory=/opt/hAIrspray
 
 # Use `docker compose` v2 (built into Docker Engine). If you still have
 # the old `docker-compose` binary, replace these with:

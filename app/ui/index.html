@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ai·spray — control panel</title>
+<title>hAIrspray — SASE/NGFW AI app-inspection tester</title>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,7 +11,7 @@
 
 <style>
   /* ==============================================================
-     ai-spray control panel
+     hAIrspray control panel
      ============================================================== */
 
   :root {
@@ -91,17 +91,55 @@
                 0 2px 24px -8px var(--amber-glow);
   }
 
-  .wordmark {
-    font-family: var(--ff-display);
-    font-size: 22px;
-    letter-spacing: 0.08em;
-    color: var(--amber);
-    text-shadow: 0 0 16px var(--amber-glow);
+  header .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     padding-right: 16px;
     margin-right: 4px;
     border-right: 1px solid var(--border);
+  }
+  header .logo {
+    width: 28px;
+    height: 28px;
+    color: var(--amber);
+    filter: drop-shadow(0 0 6px var(--amber-glow));
+    flex-shrink: 0;
+  }
+  .wordmark-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
     line-height: 1;
-    padding-block: 4px;
+  }
+  .wordmark {
+    font-family: var(--ff-display);
+    font-size: 22px;
+    letter-spacing: 0.04em;
+    line-height: 1;
+    padding-block: 2px;
+  }
+  .wordmark .dim {
+    color: var(--amber);
+    opacity: 0.7;
+    text-shadow: 0 0 10px var(--amber-glow);
+  }
+  .wordmark .accent {
+    color: var(--amber-bright, var(--amber));
+    text-shadow: 0 0 12px var(--amber-glow), 0 0 2px var(--amber);
+  }
+  .byline {
+    font-family: var(--ff-mono, inherit);
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  @media (max-width: 900px) {
+    .byline { display: none; }
+    header .logo { width: 24px; height: 24px; }
+    .wordmark { font-size: 18px; }
   }
 
   header .meta {
@@ -1104,10 +1142,44 @@
 <body>
 
 <header>
-  <div class="wordmark">AI·SPRAY</div>
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"
+         aria-hidden="true" focusable="false">
+      <!--
+        Aerosol can with angled nozzle and a diagonal spray burst out
+        the top-right. Monoline + amber currentColor so it inherits
+        the wordmark's glow. The can IS the pun — hairspray in a box.
+      -->
+      <g fill="currentColor">
+        <!-- Spray particles (angled up-right from the nozzle) -->
+        <circle cx="23.5" cy="2.5" r="0.6" opacity="0.75"/>
+        <circle cx="25.5" cy="4"   r="0.9" opacity="0.9"/>
+        <circle cx="28"   cy="6"   r="0.6" opacity="0.65"/>
+        <circle cx="29.5" cy="2.8" r="0.5" opacity="0.5"/>
+        <circle cx="26"   cy="7.8" r="0.5" opacity="0.55"/>
+        <circle cx="30.5" cy="5"   r="0.4" opacity="0.45"/>
+        <!-- Angled nozzle tip -->
+        <path d="M15 5 L21 3.5 L21 7 L15 8.5 Z"/>
+        <!-- Nozzle collar -->
+        <rect x="12" y="8" width="8" height="3"/>
+      </g>
+      <!-- Can body (stroked) -->
+      <rect x="8" y="11" width="16" height="19" rx="1.8" ry="1.8"
+            fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <!-- Label stripes on the can -->
+      <line x1="8" y1="17" x2="24" y2="17"
+            stroke="currentColor" stroke-width="0.9" opacity="0.55"/>
+      <line x1="8" y1="23" x2="24" y2="23"
+            stroke="currentColor" stroke-width="0.9" opacity="0.55"/>
+    </svg>
+    <div class="wordmark-wrap">
+      <div class="wordmark"><span class="dim">h</span><span class="accent">AI</span><span class="dim">rspray</span></div>
+      <div class="byline">Created by Damon Cassell · Cato Networks · No Warranty · You Accept All Risk</div>
+    </div>
+  </div>
   <div class="meta">
-    <span>Traffic Generator</span><span class="sep">·</span>
-    <span><span id="meta-targets">—</span> targets</span><span class="sep">·</span>
+    <span>AI App Traffic Generator</span><span class="sep">·</span>
+    <span><span id="meta-targets">—</span> probes</span><span class="sep">·</span>
     <span><span id="meta-categories">—</span> categories</span>
   </div>
   <span class="grow"></span>
@@ -1125,7 +1197,9 @@
 
 <nav class="tabs" role="tablist" aria-label="Sections">
   <button class="tab-btn active" role="tab" data-tab="prompt"
-          aria-selected="true" aria-controls="tab-prompt">Prompt &amp; Fire</button>
+          aria-selected="true" aria-controls="tab-prompt">Prompt</button>
+  <button class="tab-btn" role="tab" data-tab="probes"
+          aria-selected="false" aria-controls="tab-probes">App Probes</button>
   <button class="tab-btn" role="tab" data-tab="config"
           aria-selected="false" aria-controls="tab-config">Config</button>
   <button class="tab-btn" role="tab" data-tab="monitor"
@@ -1135,9 +1209,10 @@
 <main>
 
   <!-- ============================================================ -->
-  <!-- Tab 1: Prompt & Fire                                         -->
-  <!--   Everything that actively generates traffic or controls     -->
-  <!--   what's fire-able. Keys + Prompt panel + Targets table.     -->
+  <!-- Tab 1: Prompt                                                -->
+  <!--   Submit a prompt to keyless and keyed AI providers and see  -->
+  <!--   the real responses inline. The only path in hAIrspray that -->
+  <!--   surfaces actual model output.                              -->
   <!-- ============================================================ -->
   <div class="tab-panel active" id="tab-prompt" role="tabpanel"
        aria-labelledby="tab-prompt-btn">
@@ -1176,8 +1251,21 @@
       </div>
     </section>
 
+  </div><!-- /tab-prompt -->
+
+  <!-- ============================================================ -->
+  <!-- Tab 2: App Probes                                            -->
+  <!--   The full catalogue of AI-application probes hAIrspray can  -->
+  <!--   fire. This is the primary surface for generating traffic   -->
+  <!--   that a SASE platform or NGFW should be able to identify    -->
+  <!--   and classify: enable/disable individual probes, fire any   -->
+  <!--   one, fire an entire category, or fire everything at once.  -->
+  <!-- ============================================================ -->
+  <div class="tab-panel" id="tab-probes" role="tabpanel"
+       aria-labelledby="tab-probes-btn">
+
     <section class="panel full" id="targets-panel">
-      <div class="head">Targets<span class="grow"></span><span class="fade" id="targets-summary">—</span></div>
+      <div class="head">App Probes<span class="grow"></span><span class="fade" id="targets-summary">—</span></div>
       <div class="targets-controls">
         <input type="text" id="tgt-search" placeholder="filter by name or URL…" style="flex: 1 1 220px;">
         <select id="tgt-cat"><option value="">all categories</option></select>
@@ -1189,8 +1277,8 @@
         <button class="btn small" id="tgt-enable-all">Enable all</button>
         <button class="btn small" id="tgt-disable-all">Disable all</button>
         <span class="sep" style="margin:0 2px;">│</span>
-        <button class="btn small" id="tgt-fire-channel" title="fire every enabled target in the selected category">Fire Category</button>
-        <button class="btn small danger" id="tgt-fire-all" title="fire every enabled target once, concurrency-capped">⚡ Fire All</button>
+        <button class="btn small" id="tgt-fire-channel" title="fire every enabled probe in the selected category">Fire Category</button>
+        <button class="btn small danger" id="tgt-fire-all" title="fire every enabled probe once, concurrency-capped">⚡ Fire All</button>
       </div>
       <div class="fire-all-bar" id="fa-bar" hidden>
         <span class="fa-dot"></span>
@@ -1220,7 +1308,7 @@
       </div>
     </section>
 
-  </div><!-- /tab-prompt -->
+  </div><!-- /tab-probes -->
 
   <!-- ============================================================ -->
   <!-- Tab 2: Config                                                -->
@@ -1855,7 +1943,7 @@ function bindLogControls() {
     const ndjson = S.events.map(e => JSON.stringify(e)).join("\n");
     const blob = new Blob([ndjson], {type: "application/x-ndjson"});
     const url = URL.createObjectURL(blob);
-    const a = el("a", {href:url, download: "ai-spray-events-" + Date.now() + ".ndjson"});
+    const a = el("a", {href:url, download: "hAIrspray-events-" + Date.now() + ".ndjson"});
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 0);
   });
@@ -2027,7 +2115,7 @@ const PromptUI = (() => {
               + "parallel keyless requests per source IP).";
         } else if (r.status === 404) {
           msg = "Model no longer exists on this keyless endpoint. The upstream "
-              + "provider has deprecated it since the ai-spray catalogue was "
+              + "provider has deprecated it since the hAIrspray catalogue was "
               + "last synced.";
         } else if (r.status === 402) {
           msg = "Upstream wants payment now (Pollinations moved this model "
@@ -2398,7 +2486,7 @@ window.KeysUI = KeysUI;
 // ================================================================
 
 function initTabs() {
-  const VALID = ["prompt", "config", "monitor"];
+  const VALID = ["prompt", "probes", "config", "monitor"];
   const DEFAULT_TAB = "prompt";
 
   function activate(name) {
