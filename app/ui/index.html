@@ -334,6 +334,166 @@
     color: var(--amber-bright);
   }
 
+  /* ========================== PROMPT PANEL ========================== */
+
+  #prompt-input {
+    width: 100%;
+    resize: vertical;
+    background: var(--chassis-deep);
+    border: 1px solid var(--border-hi);
+    color: var(--text);
+    font-family: var(--ff-mono);
+    font-size: 13px;
+    line-height: 1.45;
+    padding: 10px 12px;
+    border-radius: 2px;
+    outline: none;
+    transition: border-color 90ms linear;
+  }
+  #prompt-input:focus {
+    border-color: var(--amber);
+    box-shadow: 0 0 0 1px var(--amber-deep);
+  }
+  #prompt-input::placeholder { color: var(--text-faint); }
+
+  .prompt-controls {
+    display: flex; align-items: center; gap: 10px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+  .prompt-controls .grow { flex: 1; }
+  #prompt-send {
+    min-width: 84px;
+    background: var(--amber-soft);
+    border-color: var(--amber-deep);
+    color: var(--amber-bright);
+  }
+  #prompt-send:hover {
+    background: rgba(255,169,77,.12);
+    border-color: var(--amber);
+    color: var(--amber-bright);
+  }
+  #prompt-send:disabled {
+    opacity: 0.4; cursor: not-allowed;
+  }
+
+  .prompt-models {
+    margin-top: 14px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    background: var(--chassis-deep);
+  }
+  .prompt-models.collapsed .prompt-models-grid { display: none; }
+  .prompt-models-head {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 10px;
+  }
+  .prompt-models-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 4px 16px;
+  }
+  .prompt-model {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px;
+    padding: 4px 0;
+    cursor: pointer;
+    user-select: none;
+  }
+  .prompt-model:hover { color: var(--amber-bright); }
+  .prompt-model input[type="checkbox"] {
+    accent-color: var(--amber);
+  }
+  .prompt-model .kind-chip {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 2px;
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border: 1px solid var(--border-hi);
+    color: var(--text-dim);
+  }
+  .prompt-model .kind-chip.text  { color: var(--cyan);  border-color: #1a3a38; }
+  .prompt-model .kind-chip.image { color: var(--ok);    border-color: #1f3a1a; }
+
+  .prompt-responses {
+    margin-top: 16px;
+    display: grid;
+    gap: 10px;
+  }
+  .prompt-responses:empty { margin-top: 0; }
+
+  .response-card {
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    background: var(--chassis-deep);
+    padding: 10px 12px;
+    display: grid;
+    grid-template-columns: minmax(220px, 260px) 1fr;
+    gap: 12px;
+  }
+  .response-card.pending { opacity: 0.6; }
+  .response-card.error { border-color: #3a1414; }
+  .response-card.ok { border-color: #1f3a1a; }
+
+  .response-meta {
+    display: flex; flex-direction: column; gap: 3px;
+    font-size: 11px;
+    color: var(--text-dim);
+    border-right: 1px solid var(--border);
+    padding-right: 12px;
+  }
+  .response-meta .rc-label {
+    color: var(--text);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .response-meta .rc-line {
+    display: flex; align-items: center; gap: 6px;
+    flex-wrap: wrap;
+  }
+  .response-meta .rc-status {
+    padding: 1px 6px;
+    border: 1px solid var(--border-hi);
+    border-radius: 2px;
+    font-weight: 600;
+    font-size: 10px;
+  }
+  .response-meta .rc-status.ok  { color: var(--ok);  border-color: #1f3a1a; }
+  .response-meta .rc-status.err { color: var(--err); border-color: #3a1414; }
+  .response-meta .rc-status.pending { color: var(--amber); border-color: var(--amber-deep); }
+  .response-meta .rc-latency { color: var(--text-faint); }
+
+  .response-body {
+    font-family: var(--ff-mono);
+    font-size: 12.5px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text);
+    max-height: 340px;
+    overflow: auto;
+  }
+  .response-body.image-body {
+    font-size: 11.5px;
+    color: var(--text-dim);
+  }
+  .response-body.image-body a {
+    display: inline-block;
+    margin-top: 2px;
+    word-break: break-all;
+  }
+  .response-body.error-body { color: #ffa59e; }
+  .response-body.pending-body { color: var(--text-faint); font-style: italic; }
+
+  @media (max-width: 700px) {
+    .response-card { grid-template-columns: 1fr; }
+    .response-meta { border-right: 0; border-bottom: 1px solid var(--border);
+                     padding-right: 0; padding-bottom: 8px; }
+  }
+
   /* ========================== STATS ========================== */
 
   .stats-grid {
@@ -825,6 +985,40 @@
 </div>
 
 <main>
+
+  <section class="panel full" id="prompt-panel">
+    <div class="head">
+      Prompt<span class="grow"></span>
+      <span class="fade">keyless models · real responses</span>
+    </div>
+    <div class="body">
+      <textarea id="prompt-input"
+                rows="3"
+                maxlength="4000"
+                placeholder="Write a prompt here. It'll be sent to every checked model below; text replies and image URLs come back inline. Example: Explain TCP congestion control in one paragraph."></textarea>
+      <div class="prompt-controls">
+        <button class="btn" id="prompt-send">Send</button>
+        <button class="btn" id="prompt-cancel" hidden>Cancel</button>
+        <span class="grow"></span>
+        <span class="mono fade" id="prompt-status">—</span>
+        <button class="btn small" id="prompt-toggle-models" aria-expanded="true">Hide models</button>
+      </div>
+      <div class="prompt-models" id="prompt-models">
+        <div class="prompt-models-head">
+          <span class="section-label">Models</span>
+          <span class="grow"></span>
+          <button class="btn small" id="prompt-models-all">All</button>
+          <button class="btn small" id="prompt-models-none">None</button>
+          <button class="btn small" id="prompt-models-text">Text only</button>
+          <button class="btn small" id="prompt-models-image">Image only</button>
+        </div>
+        <div class="prompt-models-grid" id="prompt-models-grid">
+          <span class="fade mono">loading…</span>
+        </div>
+      </div>
+      <div class="prompt-responses" id="prompt-responses"></div>
+    </div>
+  </section>
 
   <section class="panel" id="stats-panel">
     <div class="head">Stats<span class="grow"></span><span class="fade" id="tick-age">—</span></div>
@@ -1468,6 +1662,290 @@ function bindLogControls() {
 
 $("#pause-btn").addEventListener("click", togglePause);
 
+// ================================================================
+// Prompt panel — keyless real-response submission + SSE render
+// ================================================================
+
+const PromptUI = (() => {
+  let catalogue = [];            // [{id, provider, model, kind, label}]
+  let checked = new Set();       // ids currently ticked
+  let activeAbort = null;        // AbortController for in-flight stream
+
+  const E = {
+    input:       () => $("#prompt-input"),
+    send:        () => $("#prompt-send"),
+    cancel:      () => $("#prompt-cancel"),
+    status:      () => $("#prompt-status"),
+    toggle:      () => $("#prompt-toggle-models"),
+    modelsWrap:  () => $("#prompt-models"),
+    modelsGrid:  () => $("#prompt-models-grid"),
+    allBtn:      () => $("#prompt-models-all"),
+    noneBtn:     () => $("#prompt-models-none"),
+    textBtn:     () => $("#prompt-models-text"),
+    imgBtn:      () => $("#prompt-models-image"),
+    responses:   () => $("#prompt-responses"),
+  };
+
+  async function loadCatalogue() {
+    try {
+      const r = await fetch("/api/prompt/targets");
+      const data = await r.json();
+      catalogue = data.targets || [];
+      checked = new Set(catalogue.map(t => t.id));
+      renderModelList();
+    } catch (e) {
+      E.modelsGrid().innerHTML = "";
+      E.modelsGrid().appendChild(el("span", {class:"fade mono"},
+        "failed to load target catalogue: " + e));
+    }
+  }
+
+  function renderModelList() {
+    const g = E.modelsGrid();
+    g.innerHTML = "";
+    for (const t of catalogue) {
+      const id = "pmodel-" + t.id.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const cb = el("input", {type: "checkbox", id});
+      cb.checked = checked.has(t.id);
+      cb.addEventListener("change", () => {
+        if (cb.checked) checked.add(t.id); else checked.delete(t.id);
+        updateSendEnabled();
+      });
+      const kindChip = el("span", {class: "kind-chip " + t.kind}, t.kind);
+      const label = el("label", {for: id, class: "prompt-model"}, [
+        cb, kindChip, document.createTextNode(t.label),
+      ]);
+      g.appendChild(label);
+    }
+    updateSendEnabled();
+  }
+
+  function setAllChecked(pred) {
+    for (const t of catalogue) {
+      if (pred(t)) checked.add(t.id);
+      else         checked.delete(t.id);
+    }
+    // Update checkboxes in-place
+    $$("#prompt-models-grid input[type=checkbox]").forEach(cb => {
+      const id = cb.id.replace("pmodel-", "").replace(/_/g, "")
+                 .toLowerCase();
+      // Easier: walk catalogue, find matching dom node by order
+    });
+    renderModelList();  // simpler — re-render with new state
+  }
+
+  function updateSendEnabled() {
+    E.send().disabled = checked.size === 0;
+    if (checked.size === 0) {
+      E.status().textContent = "no targets selected";
+    } else if (!activeAbort) {
+      E.status().textContent = `${checked.size} / ${catalogue.length} targets selected`;
+    }
+  }
+
+  function toggleModelsPanel() {
+    const w = E.modelsWrap();
+    const collapsed = w.classList.toggle("collapsed");
+    E.toggle().setAttribute("aria-expanded", String(!collapsed));
+    E.toggle().textContent = collapsed ? "Show models" : "Hide models";
+  }
+
+  // ----- response rendering -----
+
+  const pendingCards = new Map(); // target_id -> DOM node
+
+  function resetResponses() {
+    pendingCards.clear();
+    E.responses().innerHTML = "";
+  }
+
+  function seedPendingCards(targetIds) {
+    for (const id of targetIds) {
+      const t = catalogue.find(x => x.id === id);
+      if (!t) continue;
+      const card = renderCard({
+        target_id: id, label: t.label, kind: t.kind,
+        ok: false, status: null, latency_ms: null,
+        url: null, body: null, _pending: true,
+      });
+      pendingCards.set(id, card);
+      E.responses().appendChild(card);
+    }
+  }
+
+  function renderCard(r) {
+    const isPending = r._pending;
+    let cls = "response-card";
+    if (isPending) cls += " pending";
+    else if (r.kind === "error" || !r.ok) cls += " error";
+    else cls += " ok";
+
+    const statusText = isPending
+      ? "…"
+      : (r.status != null ? String(r.status)
+        : (r.ok ? "OK" : "ERR"));
+    const statusCls = isPending
+      ? "pending"
+      : (r.ok ? "ok" : "err");
+
+    const meta = el("div", {class:"response-meta"}, [
+      el("div", {class:"rc-label"}, r.label),
+      el("div", {class:"rc-line"}, [
+        el("span", {class:"rc-status " + statusCls}, statusText),
+        el("span", {class:"rc-latency mono"},
+          r.latency_ms != null ? r.latency_ms + " ms" : "—"),
+      ]),
+    ]);
+
+    let body;
+    if (isPending) {
+      body = el("div", {class:"response-body pending-body"}, "waiting…");
+    } else if (r.kind === "error" || !r.ok) {
+      const msg = r.body || ("HTTP " + (r.status ?? "transport error"));
+      body = el("div", {class:"response-body error-body"}, msg);
+    } else if (r.kind === "image") {
+      body = el("div", {class:"response-body image-body"}, [
+        el("div", {}, (r.content_type || "image") + " · click to view"),
+        el("a", {href: r.url, target: "_blank", rel: "noopener noreferrer"},
+          r.url),
+      ]);
+    } else {
+      body = el("div", {class:"response-body"}, r.body || "(empty reply)");
+    }
+
+    const card = el("div", {class: cls}, [meta, body]);
+    return card;
+  }
+
+  function replaceCard(oldNode, r) {
+    const next = renderCard(r);
+    oldNode.replaceWith(next);
+    pendingCards.set(r.target_id, next);
+  }
+
+  // ----- stream submission -----
+
+  async function send() {
+    const prompt = E.input().value.trim();
+    if (!prompt) {
+      E.status().textContent = "enter a prompt first";
+      return;
+    }
+    if (checked.size === 0) return;
+
+    resetResponses();
+
+    const ids = Array.from(checked);
+    E.send().hidden = true;
+    E.cancel().hidden = false;
+    E.send().disabled = true;
+    E.status().textContent = `sending to ${ids.length}…`;
+
+    activeAbort = new AbortController();
+    let received = 0;
+    let seeded = false;
+
+    try {
+      const resp = await fetch("/api/prompt/stream", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({prompt, target_ids: ids}),
+        signal: activeAbort.signal,
+      });
+      if (!resp.ok) {
+        let err = "HTTP " + resp.status;
+        try {
+          const j = await resp.json();
+          if (j.error) err = j.error;
+        } catch {}
+        throw new Error(err);
+      }
+
+      // Parse SSE manually — EventSource only does GET. Format is
+      // one or more "data: ...\n" lines followed by blank line.
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const {value, done} = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, {stream: true});
+
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) !== -1) {
+          const frame = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const dataLines = frame.split("\n")
+            .filter(l => l.startsWith("data:"))
+            .map(l => l.slice(5).trim());
+          if (!dataLines.length) continue;
+          const payload = dataLines.join("\n");
+          let msg;
+          try { msg = JSON.parse(payload); } catch { continue; }
+
+          if (msg.kind === "start") {
+            seedPendingCards(msg.target_ids || ids);
+            seeded = true;
+          } else if (msg.kind === "end") {
+            /* handled in finally */
+          } else if (msg.target_id) {
+            received++;
+            const existing = pendingCards.get(msg.target_id);
+            if (existing) {
+              replaceCard(existing, msg);
+            } else {
+              const card = renderCard(msg);
+              pendingCards.set(msg.target_id, card);
+              E.responses().appendChild(card);
+            }
+            E.status().textContent = `${received} / ${ids.length} received`;
+          }
+        }
+      }
+      E.status().textContent = `done · ${received} / ${ids.length} replied`;
+    } catch (e) {
+      if (e.name === "AbortError") {
+        E.status().textContent = "cancelled";
+      } else {
+        E.status().textContent = "error: " + (e.message || e);
+      }
+    } finally {
+      activeAbort = null;
+      E.send().hidden = false;
+      E.cancel().hidden = true;
+      updateSendEnabled();
+    }
+  }
+
+  function cancel() {
+    if (activeAbort) activeAbort.abort();
+  }
+
+  function bind() {
+    E.send().addEventListener("click", send);
+    E.cancel().addEventListener("click", cancel);
+    E.toggle().addEventListener("click", toggleModelsPanel);
+    E.allBtn().addEventListener("click",  () => setAllChecked(_ => true));
+    E.noneBtn().addEventListener("click", () => setAllChecked(_ => false));
+    E.textBtn().addEventListener("click", () => setAllChecked(t => t.kind === "text"));
+    E.imgBtn().addEventListener("click",  () => setAllChecked(t => t.kind === "image"));
+    // Cmd/Ctrl+Enter from the textarea submits.
+    E.input().addEventListener("keydown", (ev) => {
+      if ((ev.metaKey || ev.ctrlKey) && ev.key === "Enter") {
+        ev.preventDefault();
+        if (!E.send().disabled) send();
+      }
+    });
+  }
+
+  return {
+    init: async () => {
+      bind();
+      await loadCatalogue();
+    },
+  };
+})();
+
 async function boot() {
   populateCategoryDropdowns();
   bindConfigControls();
@@ -1475,6 +1953,7 @@ async function boot() {
   bindLogControls();
   await refreshStatus();
   await refreshTargets();
+  await PromptUI.init();
   connectStream();
   setInterval(refreshStatus, 2500);
   setInterval(refreshTargets, 10000);

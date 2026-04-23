@@ -35,6 +35,12 @@ from starlette.responses import (
 )
 from starlette.routing import Route
 
+from .prompt import (
+    PROMPT_TARGETS,
+    run_prompt_target,
+    targets_catalogue,
+    validate_target_id,
+)
 from .state import AppState
 
 log = structlog.get_logger()
@@ -411,6 +417,166 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
             },
         )
 
+    # ------------------ Prompt mode ------------------
+    #
+    # GET /api/prompt/targets — list the 13 keyless prompt-capable
+    #   model targets with stable ids + display labels.
+    #
+    # POST /api/prompt/stream — take a JSON body:
+    #     {
+    #       "prompt":    "<user text>",
+    #       "target_ids": ["pollinations-text::openai", ...]   # optional
+    #     }
+    #   Returns an SSE stream of one event per target as responses
+    #   arrive. Each event payload matches PromptResult.to_dict().
+    #   Max concurrency 10 (same bound used by fire-all, for the same
+    #   shared-IP WAF reasons).
+    #
+    #   Responses are ALSO published to the normal traffic event log
+    #   with source="prompt" so prompt runs show up in /api/events,
+    #   the Live Log pane, and per-target stats the same as any
+    #   scheduler traffic.
+
+    async def prompt_targets(request: Request) -> Response:
+        return JSONResponse({"targets": targets_catalogue()})
+
+    async def prompt_stream(request: Request) -> Response:
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return JSONResponse({"error": "invalid JSON"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "expected object"}, status_code=400)
+
+        prompt_text = body.get("prompt")
+        if not isinstance(prompt_text, str) or not prompt_text.strip():
+            return JSONResponse(
+                {"error": "prompt must be a non-empty string"},
+                status_code=400,
+            )
+        if len(prompt_text) > 4000:
+            return JSONResponse(
+                {"error": "prompt too long (max 4000 chars)"},
+                status_code=400,
+            )
+
+        requested_ids = body.get("target_ids")
+        if requested_ids is None:
+            # Default to every keyless target.
+            selected = list(PROMPT_TARGETS)
+        else:
+            if not isinstance(requested_ids, list):
+                return JSONResponse(
+                    {"error": "target_ids must be a list"},
+                    status_code=400,
+                )
+            selected = []
+            for tid in requested_ids:
+                entry = validate_target_id(str(tid))
+                if entry is None:
+                    return JSONResponse(
+                        {"error": f"unknown target_id: {tid}"},
+                        status_code=400,
+                    )
+                selected.append(entry)
+            if not selected:
+                return JSONResponse(
+                    {"error": "no targets selected"},
+                    status_code=400,
+                )
+
+        log.info(
+            "prompt_run_started",
+            prompt_chars=len(prompt_text),
+            target_count=len(selected),
+        )
+
+        sem = asyncio.Semaphore(10)
+        # Ordered output queue — runners push as soon as they finish.
+        out_q: asyncio.Queue = asyncio.Queue()
+
+        async def _one(entry: dict[str, str]) -> None:
+            async with sem:
+                result = await run_prompt_target(
+                    client, prompt_text, entry["provider"], entry["model"],
+                )
+                # Also publish into the main event log so prompt runs
+                # surface in the same place as scheduled traffic.
+                state.publish_result({
+                    "target": result.label,
+                    "category": "real_response",
+                    "method": "POST" if result.provider == "duckduckgo"
+                              else "GET",
+                    "url": result.url or "",
+                    "status": result.status,
+                    "ok": result.ok,
+                    "error": (result.body if result.kind == "error"
+                              else None),
+                    "snippet": (
+                        (result.body[:160] + "…")
+                        if result.kind == "text" and result.body
+                           and len(result.body) > 160
+                        else (result.body if result.kind == "text"
+                              else (f"image {result.content_type or ''}"
+                                    if result.kind == "image" else None))
+                    ),
+                    "source": "prompt",
+                })
+                await out_q.put(result.to_dict())
+
+        async def _orchestrate() -> None:
+            tasks = [asyncio.create_task(_one(e)) for e in selected]
+            try:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            finally:
+                await out_q.put(None)  # sentinel — end of stream
+
+        async def gen():
+            # Emit a header event so the client knows how many cards to
+            # reserve and the total count to drive the progress bar.
+            header = {
+                "kind": "start",
+                "total": len(selected),
+                "target_ids": [
+                    f"{e['provider']}::{e['model']}" for e in selected
+                ],
+            }
+            yield f"data: {json.dumps(header)}\n\n".encode("utf-8")
+
+            orch = asyncio.create_task(_orchestrate())
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    try:
+                        item = await asyncio.wait_for(
+                            out_q.get(), timeout=15.0,
+                        )
+                    except asyncio.TimeoutError:
+                        yield b": ping\n\n"
+                        continue
+                    if item is None:
+                        break
+                    yield f"data: {json.dumps(item)}\n\n".encode("utf-8")
+                # Final end event.
+                yield b"data: {\"kind\":\"end\"}\n\n"
+            finally:
+                orch.cancel()
+                try:
+                    await orch
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+        return StreamingResponse(
+            gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
+
     routes = [
         Route("/", index),
         Route("/healthz", healthz),
@@ -428,6 +594,8 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
         Route("/api/scheduler/resume", resume_scheduler, methods=["POST"]),
         Route("/api/events", recent_events),
         Route("/api/events/stream", event_stream),
+        Route("/api/prompt/targets", prompt_targets),
+        Route("/api/prompt/stream", prompt_stream, methods=["POST"]),
     ]
 
     return Starlette(debug=False, routes=routes)
