@@ -134,14 +134,64 @@
 
   main {
     padding: 20px;
-    display: grid; gap: 16px;
-    grid-template-columns: minmax(320px, 1fr) minmax(360px, 1.6fr);
     max-width: 1720px; margin: 0 auto;
   }
   main > .full { grid-column: 1 / -1; }
 
   @media (max-width: 1024px) {
-    main { grid-template-columns: 1fr; }
+    main { padding: 14px; }
+  }
+
+  /* ========================== TABS ========================== */
+
+  .tabs {
+    display: flex;
+    gap: 2px;
+    padding: 0 20px;
+    max-width: 1720px;
+    margin: 0 auto;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 10;
+  }
+  .tab-btn {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-dim);
+    padding: 12px 20px;
+    margin-bottom: -1px;
+    font-family: inherit;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: color 120ms, border-color 120ms;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active {
+    color: var(--amber);
+    border-bottom-color: var(--amber);
+    text-shadow: 0 0 8px var(--amber-glow);
+  }
+  .tab-btn:focus-visible {
+    outline: 1px solid var(--amber-deep);
+    outline-offset: -4px;
+  }
+
+  .tab-panel {
+    display: none;
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .tab-panel.active {
+    display: grid;
+  }
+  @media (max-width: 640px) {
+    .tabs { padding: 0 12px; }
+    .tab-btn { padding: 10px 12px; letter-spacing: 0.1em; }
   }
 
   /* ========================== PANELS ========================== */
@@ -1073,185 +1123,226 @@
   ⚠ <strong>No authentication</strong> — bind on loopback or keep this behind your SASE fabric. Do not expose to the public internet.
 </div>
 
+<nav class="tabs" role="tablist" aria-label="Sections">
+  <button class="tab-btn active" role="tab" data-tab="prompt"
+          aria-selected="true" aria-controls="tab-prompt">Prompt &amp; Fire</button>
+  <button class="tab-btn" role="tab" data-tab="config"
+          aria-selected="false" aria-controls="tab-config">Config</button>
+  <button class="tab-btn" role="tab" data-tab="monitor"
+          aria-selected="false" aria-controls="tab-monitor">Monitor</button>
+</nav>
+
 <main>
 
-  <section class="panel full" id="keys-panel" hidden>
-    <div class="head">
-      API Keys<span class="grow"></span>
-      <span class="fade mono" id="keys-status">—</span>
-      <button class="btn small" id="keys-toggle" aria-expanded="false">Show</button>
-    </div>
-    <div class="body" id="keys-body" hidden>
-      <div class="keys-help">
-        Paste a free-tier API key for any of the providers below to
-        unlock its models in the Prompt panel. Keys are stored on
-        disk in a Docker volume (plaintext JSON, mode 0600) and
-        survive container rebuilds. This is a lab tool — keys are
-        readable by anyone with Docker socket access on the host.
-      </div>
-      <div class="keys-list" id="keys-list">
-        <span class="fade mono">loading…</span>
-      </div>
-    </div>
-  </section>
+  <!-- ============================================================ -->
+  <!-- Tab 1: Prompt & Fire                                         -->
+  <!--   Everything that actively generates traffic or controls     -->
+  <!--   what's fire-able. Keys + Prompt panel + Targets table.     -->
+  <!-- ============================================================ -->
+  <div class="tab-panel active" id="tab-prompt" role="tabpanel"
+       aria-labelledby="tab-prompt-btn">
 
-  <section class="panel full" id="prompt-panel">
-    <div class="head">
-      Prompt<span class="grow"></span>
-      <span class="fade">one prompt, many models, real responses</span>
-    </div>
-    <div class="body">
-      <textarea id="prompt-input"
-                rows="3"
-                maxlength="4000"
-                placeholder="Write a prompt here. It'll be sent to every checked model below; text replies and image URLs come back inline. Example: Explain TCP congestion control in one paragraph."></textarea>
-      <div class="prompt-controls">
-        <button class="btn" id="prompt-send">Send</button>
-        <button class="btn" id="prompt-cancel" hidden>Cancel</button>
-        <span class="grow"></span>
-        <span class="mono fade" id="prompt-status">—</span>
-        <button class="btn small" id="prompt-toggle-models" aria-expanded="true">Hide models</button>
+    <section class="panel full" id="keys-panel" hidden>
+      <div class="head">
+        API Keys<span class="grow"></span>
+        <span class="fade mono" id="keys-status">—</span>
+        <button class="btn small" id="keys-toggle" aria-expanded="false">Show</button>
       </div>
-      <div class="prompt-models" id="prompt-models">
-        <div class="prompt-models-head">
-          <span class="section-label">Models</span>
-          <span class="grow"></span>
-          <button class="btn small" id="prompt-models-all">All</button>
-          <button class="btn small" id="prompt-models-none">None</button>
-          <button class="btn small" id="prompt-models-text">Text only</button>
-          <button class="btn small" id="prompt-models-image">Image only</button>
+      <div class="body" id="keys-body" hidden>
+        <div class="keys-help">
+          Paste a free-tier API key for any of the providers below to
+          unlock its models in the Prompt panel. Keys are stored on
+          disk in a Docker volume (plaintext JSON, mode 0600) and
+          survive container rebuilds. This is a lab tool — keys are
+          readable by anyone with Docker socket access on the host.
         </div>
-        <div class="prompt-models-grid" id="prompt-models-grid">
+        <div class="keys-list" id="keys-list">
           <span class="fade mono">loading…</span>
         </div>
       </div>
-      <div class="prompt-responses" id="prompt-responses"></div>
-    </div>
-  </section>
+    </section>
 
-  <section class="panel" id="stats-panel">
-    <div class="head">Stats<span class="grow"></span><span class="fade" id="tick-age">—</span></div>
-    <div class="body">
-      <div class="stats-grid">
-        <div class="stat">    <div class="label">Total</div>  <div class="value" id="stat-total">0</div></div>
-        <div class="stat ok"> <div class="label">OK</div>     <div class="value" id="stat-ok">0</div></div>
-        <div class="stat err"><div class="label">Errors</div> <div class="value" id="stat-err">0</div></div>
+    <section class="panel full" id="prompt-panel">
+      <div class="head">
+        Prompt<span class="grow"></span>
+        <span class="fade">one prompt, many models, real responses</span>
       </div>
-      <div class="cat-bars" id="cat-bars"></div>
-    </div>
-  </section>
+      <div class="body">
+        <textarea id="prompt-input"
+                  rows="3"
+                  maxlength="4000"
+                  placeholder="Write a prompt here. It'll be sent to every checked model below; text replies and image URLs come back inline. Example: Explain TCP congestion control in one paragraph."></textarea>
+        <div class="prompt-controls">
+          <button class="btn" id="prompt-send">Send</button>
+          <button class="btn" id="prompt-cancel" hidden>Cancel</button>
+          <span class="grow"></span>
+          <span class="mono fade" id="prompt-status">—</span>
+          <button class="btn small" id="prompt-toggle-models" aria-expanded="true">Hide models</button>
+        </div>
+        <div class="prompt-models" id="prompt-models">
+          <div class="prompt-models-head">
+            <span class="section-label">Models</span>
+            <span class="grow"></span>
+            <button class="btn small" id="prompt-models-all">All</button>
+            <button class="btn small" id="prompt-models-none">None</button>
+            <button class="btn small" id="prompt-models-text">Text only</button>
+            <button class="btn small" id="prompt-models-image">Image only</button>
+          </div>
+          <div class="prompt-models-grid" id="prompt-models-grid">
+            <span class="fade mono">loading…</span>
+          </div>
+        </div>
+        <div class="prompt-responses" id="prompt-responses"></div>
+      </div>
+    </section>
 
-  <section class="panel" id="config-panel">
-    <div class="head">Config<span class="grow"></span><span class="toast" id="config-toast">saved</span></div>
-    <div class="body">
+    <section class="panel full" id="targets-panel">
+      <div class="head">Targets<span class="grow"></span><span class="fade" id="targets-summary">—</span></div>
+      <div class="targets-controls">
+        <input type="text" id="tgt-search" placeholder="filter by name or URL…" style="flex: 1 1 220px;">
+        <select id="tgt-cat"><option value="">all categories</option></select>
+        <select id="tgt-shown">
+          <option value="all">all</option>
+          <option value="enabled">enabled only</option>
+          <option value="disabled">disabled only</option>
+        </select>
+        <button class="btn small" id="tgt-enable-all">Enable all</button>
+        <button class="btn small" id="tgt-disable-all">Disable all</button>
+        <span class="sep" style="margin:0 2px;">│</span>
+        <button class="btn small" id="tgt-fire-channel" title="fire every enabled target in the selected category">Fire Category</button>
+        <button class="btn small danger" id="tgt-fire-all" title="fire every enabled target once, concurrency-capped">⚡ Fire All</button>
+      </div>
+      <div class="fire-all-bar" id="fa-bar" hidden>
+        <span class="fa-dot"></span>
+        <span class="fa-label">FIRE-ALL</span>
+        <span class="fa-current mono" id="fa-current">—</span>
+        <span class="grow"></span>
+        <span class="mono fade" id="fa-stats">0 / 0</span>
+        <div class="fa-track"><div class="fa-fill" id="fa-fill"></div></div>
+        <button class="btn small danger" id="fa-cancel">Cancel</button>
+      </div>
+      <div class="targets-scroll">
+        <table class="targets-table">
+          <thead>
+            <tr>
+              <th style="width: 48px;">on</th>
+              <th>name</th>
+              <th>category</th>
+              <th>method</th>
+              <th>url</th>
+              <th style="text-align:right;">hits</th>
+              <th style="text-align:right;">last</th>
+              <th style="text-align:right;">fire</th>
+            </tr>
+          </thead>
+          <tbody id="tgt-body"></tbody>
+        </table>
+      </div>
+    </section>
 
-      <div class="row">
-        <label class="key">min interval</label>
-        <input type="range" id="cfg-min" min="0" max="600" step="1">
-        <span class="readout"><span id="cfg-min-v">—</span>s</span>
-      </div>
-      <div class="row">
-        <label class="key">max interval</label>
-        <input type="range" id="cfg-max" min="0" max="600" step="1">
-        <span class="readout"><span id="cfg-max-v">—</span>s</span>
-      </div>
-      <div class="row">
-        <label class="key">burst prob</label>
-        <input type="range" id="cfg-bp" min="0" max="100" step="1">
-        <span class="readout"><span id="cfg-bp-v">—</span>%</span>
-      </div>
-      <div class="row">
-        <label class="key">burst size</label>
-        <span style="display:flex;gap:6px;align-items:center;">
-          <input type="number" id="cfg-bmin" min="1" max="99">
-          <span class="sep">→</span>
-          <input type="number" id="cfg-bmax" min="1" max="99">
-        </span>
-        <span></span>
-      </div>
-      <div class="row">
-        <label class="key">burst gap</label>
-        <span style="display:flex;gap:6px;align-items:center;">
-          <input type="number" id="cfg-bgmin" min="0" max="60" step="0.5">
-          <span class="sep">→</span>
-          <input type="number" id="cfg-bgmax" min="0" max="60" step="0.5">
-        </span>
-        <span class="readout">s</span>
-      </div>
+  </div><!-- /tab-prompt -->
 
-      <div class="cat-section">
-        <div class="section-label">Categories</div>
-        <div class="checkbox-grid" id="cat-checks"></div>
+  <!-- ============================================================ -->
+  <!-- Tab 2: Config                                                -->
+  <!--   Scheduler tuning. Interval/burst params and the category   -->
+  <!--   enable/disable checkboxes.                                 -->
+  <!-- ============================================================ -->
+  <div class="tab-panel" id="tab-config" role="tabpanel"
+       aria-labelledby="tab-config-btn">
+
+    <section class="panel full" id="config-panel">
+      <div class="head">Config<span class="grow"></span><span class="toast" id="config-toast">saved</span></div>
+      <div class="body">
+
+        <div class="row">
+          <label class="key">min interval</label>
+          <input type="range" id="cfg-min" min="0" max="600" step="1">
+          <span class="readout"><span id="cfg-min-v">—</span>s</span>
+        </div>
+        <div class="row">
+          <label class="key">max interval</label>
+          <input type="range" id="cfg-max" min="0" max="600" step="1">
+          <span class="readout"><span id="cfg-max-v">—</span>s</span>
+        </div>
+        <div class="row">
+          <label class="key">burst prob</label>
+          <input type="range" id="cfg-bp" min="0" max="100" step="1">
+          <span class="readout"><span id="cfg-bp-v">—</span>%</span>
+        </div>
+        <div class="row">
+          <label class="key">burst size</label>
+          <span style="display:flex;gap:6px;align-items:center;">
+            <input type="number" id="cfg-bmin" min="1" max="99">
+            <span class="sep">→</span>
+            <input type="number" id="cfg-bmax" min="1" max="99">
+          </span>
+          <span></span>
+        </div>
+        <div class="row">
+          <label class="key">burst gap</label>
+          <span style="display:flex;gap:6px;align-items:center;">
+            <input type="number" id="cfg-bgmin" min="0" max="60" step="0.5">
+            <span class="sep">→</span>
+            <input type="number" id="cfg-bgmax" min="0" max="60" step="0.5">
+          </span>
+          <span class="readout">s</span>
+        </div>
+
+        <div class="cat-section">
+          <div class="section-label">Categories</div>
+          <div class="checkbox-grid" id="cat-checks"></div>
+        </div>
+
       </div>
+    </section>
 
-    </div>
-  </section>
+  </div><!-- /tab-config -->
 
-  <section class="panel full" id="targets-panel">
-    <div class="head">Targets<span class="grow"></span><span class="fade" id="targets-summary">—</span></div>
-    <div class="targets-controls">
-      <input type="text" id="tgt-search" placeholder="filter by name or URL…" style="flex: 1 1 220px;">
-      <select id="tgt-cat"><option value="">all categories</option></select>
-      <select id="tgt-shown">
-        <option value="all">all</option>
-        <option value="enabled">enabled only</option>
-        <option value="disabled">disabled only</option>
-      </select>
-      <button class="btn small" id="tgt-enable-all">Enable all</button>
-      <button class="btn small" id="tgt-disable-all">Disable all</button>
-      <span class="sep" style="margin:0 2px;">│</span>
-      <button class="btn small" id="tgt-fire-channel" title="fire every enabled target in the selected category">Fire Category</button>
-      <button class="btn small danger" id="tgt-fire-all" title="fire every enabled target once, concurrency-capped">⚡ Fire All</button>
-    </div>
-    <div class="fire-all-bar" id="fa-bar" hidden>
-      <span class="fa-dot"></span>
-      <span class="fa-label">FIRE-ALL</span>
-      <span class="fa-current mono" id="fa-current">—</span>
-      <span class="grow"></span>
-      <span class="mono fade" id="fa-stats">0 / 0</span>
-      <div class="fa-track"><div class="fa-fill" id="fa-fill"></div></div>
-      <button class="btn small danger" id="fa-cancel">Cancel</button>
-    </div>
-    <div class="targets-scroll">
-      <table class="targets-table">
-        <thead>
-          <tr>
-            <th style="width: 48px;">on</th>
-            <th>name</th>
-            <th>category</th>
-            <th>method</th>
-            <th>url</th>
-            <th style="text-align:right;">hits</th>
-            <th style="text-align:right;">last</th>
-            <th style="text-align:right;">fire</th>
-          </tr>
-        </thead>
-        <tbody id="tgt-body"></tbody>
-      </table>
-    </div>
-  </section>
+  <!-- ============================================================ -->
+  <!-- Tab 3: Monitor                                               -->
+  <!--   Read-only observational views. Stats + Live Log. These     -->
+  <!--   keep updating even when the tab isn't visible (the SSE     -->
+  <!--   stream and status poll run continuously) so switching here -->
+  <!--   always shows current state.                                -->
+  <!-- ============================================================ -->
+  <div class="tab-panel" id="tab-monitor" role="tabpanel"
+       aria-labelledby="tab-monitor-btn">
 
-  <section class="panel full" id="log-panel">
-    <div class="head">Live Log<span class="grow"></span><span class="fade" id="log-count">0 events</span></div>
-    <div class="log-controls">
-      <input type="text" id="log-search" placeholder="filter…" style="flex: 1 1 220px;">
-      <select id="log-cat"><option value="">all categories</option></select>
-      <select id="log-status">
-        <option value="">all statuses</option>
-        <option value="2">2xx</option>
-        <option value="3">3xx</option>
-        <option value="4">4xx</option>
-        <option value="5">5xx</option>
-        <option value="err">transport errors</option>
-      </select>
-      <label style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim);letter-spacing:0.04em;">
-        <input type="checkbox" id="log-scroll" checked> auto-scroll
-      </label>
-      <button class="btn small" id="log-clear">Clear</button>
-      <button class="btn small" id="log-export">Export NDJSON</button>
-    </div>
-    <div id="log"></div>
-  </section>
+    <section class="panel full" id="stats-panel">
+      <div class="head">Stats<span class="grow"></span><span class="fade" id="tick-age">—</span></div>
+      <div class="body">
+        <div class="stats-grid">
+          <div class="stat">    <div class="label">Total</div>  <div class="value" id="stat-total">0</div></div>
+          <div class="stat ok"> <div class="label">OK</div>     <div class="value" id="stat-ok">0</div></div>
+          <div class="stat err"><div class="label">Errors</div> <div class="value" id="stat-err">0</div></div>
+        </div>
+        <div class="cat-bars" id="cat-bars"></div>
+      </div>
+    </section>
+
+    <section class="panel full" id="log-panel">
+      <div class="head">Live Log<span class="grow"></span><span class="fade" id="log-count">0 events</span></div>
+      <div class="log-controls">
+        <input type="text" id="log-search" placeholder="filter…" style="flex: 1 1 220px;">
+        <select id="log-cat"><option value="">all categories</option></select>
+        <select id="log-status">
+          <option value="">all statuses</option>
+          <option value="2">2xx</option>
+          <option value="3">3xx</option>
+          <option value="4">4xx</option>
+          <option value="5">5xx</option>
+          <option value="err">transport errors</option>
+        </select>
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim);letter-spacing:0.04em;">
+          <input type="checkbox" id="log-scroll" checked> auto-scroll
+        </label>
+        <button class="btn small" id="log-clear">Clear</button>
+        <button class="btn small" id="log-export">Export NDJSON</button>
+      </div>
+      <div id="log"></div>
+    </section>
+
+  </div><!-- /tab-monitor -->
 
 </main>
 
@@ -2286,7 +2377,57 @@ const KeysUI = (() => {
 // Make KeysUI reachable from PromptUI's "add key" links.
 window.KeysUI = KeysUI;
 
+// ================================================================
+// Tabs — Prompt & Fire / Config / Monitor
+// ----------------------------------------------------------------
+// The panels themselves are always in the DOM; we toggle visibility
+// via a `.active` class on each `.tab-panel`. SSE and polling keep
+// running regardless of which tab is visible so the Live Log is
+// always current when the user opens Monitor, and the Stats totals
+// don't lag behind the server.
+//
+// Active tab is synced to the URL hash (#prompt / #config / #monitor)
+// so reloads and shared links land on the same tab. The default is
+// Prompt & Fire — the most common reason to open this UI.
+// ================================================================
+
+function initTabs() {
+  const VALID = ["prompt", "config", "monitor"];
+  const DEFAULT_TAB = "prompt";
+
+  function activate(name) {
+    if (!VALID.includes(name)) name = DEFAULT_TAB;
+    for (const btn of $$(".tab-btn")) {
+      const on = btn.dataset.tab === name;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+    }
+    for (const panel of $$(".tab-panel")) {
+      panel.classList.toggle("active", panel.id === "tab-" + name);
+    }
+    // Only update the hash if it's different, to avoid burning a
+    // history entry on every programmatic activate().
+    const expected = "#" + name;
+    if (window.location.hash !== expected) {
+      history.replaceState(null, "", expected);
+    }
+  }
+
+  for (const btn of $$(".tab-btn")) {
+    btn.addEventListener("click", () => activate(btn.dataset.tab));
+  }
+  window.addEventListener("hashchange", () => {
+    const raw = (window.location.hash || "").replace(/^#/, "");
+    activate(raw || DEFAULT_TAB);
+  });
+
+  // Land on whichever tab is referenced in the URL, or the default.
+  const initial = (window.location.hash || "").replace(/^#/, "");
+  activate(initial || DEFAULT_TAB);
+}
+
 async function boot() {
+  initTabs();
   populateCategoryDropdowns();
   bindConfigControls();
   bindTargetControls();
