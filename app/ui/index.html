@@ -1142,26 +1142,6 @@
   <div class="tab-panel active" id="tab-prompt" role="tabpanel"
        aria-labelledby="tab-prompt-btn">
 
-    <section class="panel full" id="keys-panel" hidden>
-      <div class="head">
-        API Keys<span class="grow"></span>
-        <span class="fade mono" id="keys-status">—</span>
-        <button class="btn small" id="keys-toggle" aria-expanded="false">Show</button>
-      </div>
-      <div class="body" id="keys-body" hidden>
-        <div class="keys-help">
-          Paste a free-tier API key for any of the providers below to
-          unlock its models in the Prompt panel. Keys are stored on
-          disk in a Docker volume (plaintext JSON, mode 0600) and
-          survive container rebuilds. This is a lab tool — keys are
-          readable by anyone with Docker socket access on the host.
-        </div>
-        <div class="keys-list" id="keys-list">
-          <span class="fade mono">loading…</span>
-        </div>
-      </div>
-    </section>
-
     <section class="panel full" id="prompt-panel">
       <div class="head">
         Prompt<span class="grow"></span>
@@ -1293,6 +1273,27 @@
           <div class="checkbox-grid" id="cat-checks"></div>
         </div>
 
+      </div>
+    </section>
+
+    <section class="panel full" id="keys-panel">
+      <div class="head">
+        API Keys<span class="grow"></span>
+        <span class="fade mono" id="keys-status">—</span>
+        <button class="btn small" id="keys-toggle" aria-expanded="true">Hide</button>
+      </div>
+      <div class="body" id="keys-body">
+        <div class="keys-help">
+          Paste a free-tier API key for any of the providers below to
+          unlock its models in the Prompt panel (under the Prompt &amp; Fire
+          tab). Keys are stored on disk in a Docker volume (plaintext
+          JSON, mode 0600) and survive container rebuilds. This is a lab
+          tool — keys are readable by anyone with Docker socket access
+          on the host.
+        </div>
+        <div class="keys-list" id="keys-list">
+          <span class="fade mono">loading…</span>
+        </div>
       </div>
     </section>
 
@@ -2207,10 +2208,6 @@ const KeysUI = (() => {
       providers = data.providers || [];
       render();
       updateHeaderStatus();
-      // The panel starts hidden; show it once we know there are
-      // keyed providers to manage. Since we always have 14, this
-      // effectively always shows.
-      E.panel().hidden = providers.length === 0;
     } catch (e) {
       E.list().innerHTML = "";
       E.list().appendChild(el("span", {class:"fade mono"},
@@ -2347,6 +2344,12 @@ const KeysUI = (() => {
   }
 
   function focusProvider(providerId) {
+    // Switch to the Config tab so the panel is visible. The hash
+    // change triggers the tab activator, same as if the user clicked
+    // the tab button themselves.
+    if (window.location.hash !== "#config") {
+      window.location.hash = "#config";
+    }
     // Open panel if collapsed, scroll to the relevant row, focus input.
     E.body().hidden = false;
     E.toggle().setAttribute("aria-expanded", "true");
@@ -2355,9 +2358,12 @@ const KeysUI = (() => {
       `.key-row[data-provider="${CSS.escape(providerId)}"]`
     );
     if (row) {
-      row.scrollIntoView({behavior: "smooth", block: "center"});
-      const input = row.querySelector("input");
-      if (input) setTimeout(() => input.focus(), 300);
+      // Wait a tick so the tab switch renders before scrolling.
+      setTimeout(() => {
+        row.scrollIntoView({behavior: "smooth", block: "center"});
+        const input = row.querySelector("input");
+        if (input) setTimeout(() => input.focus(), 300);
+      }, 50);
     }
   }
 
