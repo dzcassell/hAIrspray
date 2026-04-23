@@ -216,6 +216,46 @@ Four tabs:
   counts) and an SSE-streamed event log with search, category
   filter, status filter, and NDJSON export.
 
+## A note on obtaining free API keys
+
+The easiest way to stand up accounts across the sixteen keyed
+providers is with a Gmail address. Most of them accept **"Sign in
+with Google"** for signup, so a single Google account gets you keys
+across most of the catalog in roughly a minute each — no need to
+create a dozen-plus separate accounts, verify email on each, set a
+new password each, and so on.
+
+Providers that accept Google OAuth for signup (at time of writing):
+
+- Google Gemini (obviously — it's theirs)
+- Groq, Mistral, Cohere
+- OpenRouter, Together, Fireworks, Cerebras
+- HuggingFace, Hyperbolic, SambaNova, AI21
+- NVIDIA NIM (via the NVIDIA Developer Program, which itself
+  accepts Google)
+
+The two-and-a-half exceptions worth knowing about:
+
+- **GitHub Models** uses your GitHub account — fair enough, since
+  the whole point of the service is that you're already on GitHub.
+  Generate a personal access token with the `models:read` scope
+  and paste that instead.
+- **DeepSeek** typically requires email (and sometimes phone)
+  signup rather than Google OAuth. It's a Chinese cloud provider;
+  the console is mostly English-localized but the signup flow is
+  more conventional.
+- **xAI** is the half — Google OAuth is sometimes available,
+  sometimes not, depending on the current state of their auth
+  integrations. X/Twitter auth is the reliably-present alternative.
+
+The Config → Keys panel in hAIrspray puts a **🔑 add key** link next
+to every provider that jumps you directly to that vendor's key-
+generation page, so you don't need to hunt through each vendor's
+documentation to find where they hid it. Expected total time to
+populate the whole panel from scratch on a fresh Gmail account:
+roughly 20–30 minutes, most of which is clicking through sign-up
+flows rather than anything hAIrspray-specific.
+
 ## Typical SASE/NGFW test workflow
 
 1. **Deploy behind the fabric** you want to test. For SASE sockets,
