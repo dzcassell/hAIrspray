@@ -85,6 +85,106 @@ Then open `http://<host>:8090/` — the web UI is the primary interface.
 You can also run it as a systemd service with the unit file in
 `systemd/hairspray.service`.
 
+## Running on macOS
+
+hAIrspray runs on current macOS (Apple Silicon, Docker Desktop)
+without any code changes. The container itself is Linux, executing
+inside Docker Desktop's lightweight VM — macOS is only hosting the
+process and forwarding port 8090 to your browser.
+
+### Quick start on macOS
+
+```bash
+# Install Docker Desktop if you haven't already:
+#   https://www.docker.com/products/docker-desktop/
+# Open the app so the whale icon appears in your menu bar. Docker
+# Desktop must be running before any `docker compose` command works.
+
+git clone https://github.com/dzcassell/hAIrspray.git ~/Code/hAIrspray
+cd ~/Code/hAIrspray
+
+cp .env.example .env
+# Optional edits: narrow categories, bind the UI to loopback
+# (HEALTH_BIND=127.0.0.1), change the host port, etc.
+
+docker compose up -d --build
+docker compose logs -f
+```
+
+Open <http://localhost:8090> in Safari or your browser of choice.
+
+### Autostart options
+
+On Linux, autostart is handled by `systemd/hairspray.service`. macOS
+has no systemd; you have two options:
+
+**Option 1 (simplest) — Docker Desktop's built-in autostart.** Open
+Docker Desktop → Settings → General → check "Start Docker Desktop
+when you log in." Because `docker-compose.yml` declares
+`restart: unless-stopped`, the hAIrspray container resumes
+automatically whenever Docker Desktop starts. For most lab use, this
+is all you need.
+
+**Option 2 — launchd agent.** If you want hAIrspray to come up
+deterministically on every login, independent of Docker Desktop's
+own autostart setting, install the launchd agent shipped in
+`macos/`:
+
+```bash
+cd ~/Code/hAIrspray
+./macos/install.sh
+```
+
+What the installer does:
+
+1. Renders `macos/hairspray.plist.template` with your absolute
+   paths (launchd doesn't expand `~` or `$HOME` in plist values)
+   and writes the result to
+   `~/Library/LaunchAgents/ai.hairspray.autostart.plist`.
+2. Makes `macos/hairspray-start.sh` executable — this is the
+   wrapper launchd actually invokes. It polls `docker info` for up
+   to 3 minutes, waiting for Docker Desktop to finish initializing
+   its Linux VM (on a cold boot this can take 30–90s), then runs
+   `docker compose up -d --build`.
+3. Loads the agent with `launchctl load`, so it runs immediately
+   and on every login thereafter.
+
+Logs go to `~/Library/Logs/hAIrspray-launchd.log`. To check status:
+
+```bash
+launchctl list | grep ai.hairspray.autostart
+```
+
+To remove the agent later:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/ai.hairspray.autostart.plist
+rm ~/Library/LaunchAgents/ai.hairspray.autostart.plist
+```
+
+The launchd agent runs **per-user** (it's in `~/Library/` not
+`/Library/`), so it won't try to start hAIrspray before the user
+logs in. Docker Desktop is also per-user, so this matches the
+expected lifecycle.
+
+### Things that are different on macOS
+
+- **No systemd.** The `systemd/hairspray.service` file is Linux-only;
+  ignore it on Mac.
+- **Paths.** The Linux quick-start uses `/opt`; on Mac, `~/Code/hAIrspray`
+  is more idiomatic, and you don't need `sudo` to clone into your
+  home directory.
+- **Named volumes, not bind mounts.** hAIrspray only uses named Docker
+  volumes, so you don't hit Docker Desktop's bind-mount file-sharing
+  performance quirks. Saved API keys live in the `ai-spray-keys`
+  volume inside Docker Desktop's VM and persist across container
+  rebuilds.
+- **Resource limits.** Docker Desktop caps CPU/RAM from the Mac's
+  pool; the defaults (~4 CPUs, 8 GB RAM) are more than enough for
+  hAIrspray, which uses well under 200 MB at full tilt.
+- **No `tini` install needed.** The container already bundles tini;
+  macOS doesn't care what runs as PID 1 inside the Linux VM.
+
 ## The UI
 
 Four tabs:

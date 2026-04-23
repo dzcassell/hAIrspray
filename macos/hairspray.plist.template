@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  hAIrspray launchd agent template.
+
+  This is a template — placeholders __REPO_DIR__ and __HOME__ get
+  substituted with absolute paths by macos/install.sh. Don't edit this
+  file directly unless you're writing the installer; edit the final
+  rendered copy at ~/Library/LaunchAgents/ai.hairspray.autostart.plist.
+
+  launchd does NOT expand ~ or $HOME in plist values, which is why we
+  substitute these at install time rather than relying on shell
+  expansion.
+-->
+<plist version="1.0">
+<dict>
+
+    <!-- Reverse-DNS label; used by launchctl. Must match the plist
+         filename (ai.hairspray.autostart.plist). -->
+    <key>Label</key>
+    <string>ai.hairspray.autostart</string>
+
+    <!-- What to run. The wrapper script locates docker, waits for
+         Docker Desktop, and then runs `docker compose up -d`. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>__REPO_DIR__/macos/hairspray-start.sh</string>
+    </array>
+
+    <!-- Run once at login. -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Don't restart on exit; the container is then owned by Docker
+         Desktop, and `restart: unless-stopped` in docker-compose.yml
+         handles its lifecycle. This launchd job is only responsible
+         for the initial start. -->
+    <key>KeepAlive</key>
+    <false/>
+
+    <!-- Back off aggressively if something fails, so a broken config
+         doesn't spam logs at login. -->
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <!-- Log output. Both stdout and stderr go to one file so you have
+         a single place to check if autostart isn't working. -->
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/hAIrspray-launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/hAIrspray-launchd.log</string>
+
+    <!-- launchd runs jobs with a minimal PATH. Docker Desktop adds
+         /usr/local/bin/docker (Intel path, still present on Apple
+         Silicon); Homebrew adds /opt/homebrew/bin. Include both so
+         the wrapper script's `which docker` works. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+</dict>
+</plist>
