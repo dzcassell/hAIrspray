@@ -4,6 +4,10 @@
 SASE / NGFW / SWG shows you whether it can actually identify, classify,
 and control them.**
 
+![hAIrspray Prompt tab — 160 AI text and image models in one grid, one prompt, real streamed responses side by side.](docs/screenshot-prompt.jpg)
+
+<sub>Prompt & Fire — one prompt, 160 model/provider pairs, real responses streamed back inline. 12 keyless providers (Pollinations, DuckDuckGo AI Chat), 16 keyed free-tier providers (Gemini, Groq, Mistral, Cohere, OpenRouter, HuggingFace, Together, Cerebras, SambaNova, Hyperbolic, DeepSeek, xAI, AI21, Fireworks, NVIDIA NIM, GitHub Models). Live dynamic-discovery populates the grid with whatever models each key actually unlocks.</sub>
+
 Vendors claim AI-app visibility. hAIrspray lets you find out. Point it
 at your corporate egress, enable the probes relevant to your test, and
 watch your security fabric's application-analytics dashboard light up —
