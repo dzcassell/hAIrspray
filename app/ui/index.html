@@ -1151,6 +1151,177 @@
   .panel:nth-of-type(3) { animation-delay: 120ms; }
   .panel:nth-of-type(4) { animation-delay: 180ms; }
 
+  /* -----------------------------------------------------------------
+     CERT HELP button + modal
+     ----------------------------------------------------------------- */
+  .cert-help-btn {
+    /* Sits in the header next to Pause. Styled as a subtle amber pill
+       so it reads as "help" / utility, not as a primary action. */
+    border-color: var(--amber-deep);
+    color: var(--amber);
+    letter-spacing: 0.10em;
+    font-weight: 700;
+  }
+  .cert-help-btn:hover {
+    border-color: var(--amber);
+    background: var(--amber-soft);
+    color: var(--amber-bright);
+  }
+
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(4, 5, 8, 0.78);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    z-index: 1000;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 48px 20px 40px;
+    overflow-y: auto;
+    animation: modalFadeIn 120ms ease-out;
+  }
+  .modal-backdrop[hidden] { display: none; }
+  @keyframes modalFadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  .modal-panel {
+    background: var(--chassis);
+    border: 1px solid var(--border-hi);
+    border-radius: 4px;
+    max-width: 720px;
+    width: 100%;
+    color: var(--text);
+    box-shadow:
+      0 24px 60px -10px rgba(0,0,0,0.7),
+      0 0 0 1px var(--border-bright),
+      inset 0 1px 0 rgba(255,255,255,0.02);
+    animation: modalSlideIn 160ms ease-out;
+  }
+  @keyframes modalSlideIn {
+    from { transform: translateY(-8px); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 22px;
+    border-bottom: 1px solid var(--border);
+    background: var(--chassis-deep);
+    border-radius: 4px 4px 0 0;
+  }
+  .modal-title {
+    font: 700 12px/1 var(--mono, ui-monospace, Menlo, monospace);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--amber);
+  }
+  .modal-close {
+    background: transparent;
+    border: 0;
+    color: var(--text-dim);
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 6px;
+    transition: color 90ms;
+  }
+  .modal-close:hover,
+  .modal-close:focus-visible {
+    color: var(--amber);
+    outline: none;
+  }
+
+  .modal-body {
+    padding: 20px 26px 24px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text);
+  }
+  .modal-body h3 {
+    margin: 22px 0 6px;
+    font: 700 11px/1.2 var(--mono, ui-monospace, Menlo, monospace);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--amber);
+    border-left: 2px solid var(--amber);
+    padding-left: 10px;
+  }
+  .modal-body h3:first-child { margin-top: 0; }
+  .modal-body p { margin: 0 0 10px; }
+  .modal-body ul { margin: 4px 0 12px; padding-left: 22px; }
+  .modal-body li { margin: 3px 0; }
+  .modal-body code {
+    background: var(--chassis-deep);
+    border: 1px solid var(--border);
+    padding: 1px 6px;
+    border-radius: 2px;
+    font: 500 12px/1.4 var(--mono, ui-monospace, Menlo, monospace);
+    color: var(--cyan);
+    white-space: nowrap;
+  }
+  .modal-body pre {
+    background: var(--chassis-deep);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 10px 14px;
+    margin: 6px 0 12px;
+    overflow-x: auto;
+    font: 500 12px/1.5 var(--mono, ui-monospace, Menlo, monospace);
+    color: var(--text);
+    white-space: pre;
+  }
+  .modal-body pre code {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: inherit;
+    white-space: pre;
+  }
+  .modal-lede {
+    color: var(--text);
+    padding: 10px 14px;
+    background: var(--amber-soft);
+    border-left: 2px solid var(--amber);
+    margin: 0 0 16px !important;
+  }
+  .modal-body .fineprint,
+  .modal-body .note {
+    color: var(--text-dim);
+    font-size: 12px;
+  }
+  .modal-body .note {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+  }
+  .modal-body .modal-troubleshoot {
+    margin-top: 14px;
+    padding: 10px 14px;
+    background: var(--chassis-hi);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .modal-body .modal-troubleshoot strong,
+  .modal-body .modal-troubleshoot code {
+    color: var(--text);
+  }
+
+  /* Tighter layout on narrow screens */
+  @media (max-width: 640px) {
+    .modal-backdrop { padding: 24px 12px; }
+    .modal-header   { padding: 12px 16px; }
+    .modal-body     { padding: 16px 18px 18px; font-size: 12.5px; }
+    .modal-body h3  { font-size: 10.5px; }
+  }
+
 </style>
 </head>
 <body>
@@ -1199,6 +1370,7 @@
   <span class="grow"></span>
   <span id="status-pill" class="pill paused"><span class="dot"></span><span class="label">PAUSED</span></span>
   <button id="pause-btn" class="btn">Pause</button>
+  <button id="cert-help-btn" class="btn cert-help-btn" type="button" title="Installing your SASE re-sign CA">CERT HELP</button>
   <div class="readouts">
     <span class="mono fade" id="uptime">uptime: —</span>
   </div>
@@ -1206,6 +1378,113 @@
 
 <div class="banner">
   ⚠ <strong>No authentication</strong> — bind on loopback or keep this behind your SASE fabric. Do not expose to the public internet.
+</div>
+
+<!-- =================================================================== -->
+<!-- CERT HELP modal — explains how to install the SASE re-sign CA       -->
+<!-- into ./certs/ so TLS verification works inside an inspecting fabric. -->
+<!-- Mac-focused because most lab-side operators are on macOS laptops;    -->
+<!-- Linux section is one tail note since the workflow is identical save  -->
+<!-- for the clone path.                                                  -->
+<!-- =================================================================== -->
+<div id="cert-help-modal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="cert-help-title">
+  <div class="modal-panel" role="document">
+    <div class="modal-header">
+      <div class="modal-title" id="cert-help-title">Installing your SASE re-sign certificate</div>
+      <button class="modal-close" type="button" id="cert-help-close" aria-label="Close dialog">×</button>
+    </div>
+    <div class="modal-body">
+
+      <p class="modal-lede">
+        Seeing <code>CERTIFICATE_VERIFY_FAILED</code> errors in the Monitor
+        tab? Your SASE/NGFW (Cato, Zscaler, Palo Alto Prisma, Netskope, etc.)
+        is decrypting outbound HTTPS and re-signing with its own CA. That CA
+        isn't trusted by the container yet. Here's how to fix it on macOS
+        — typically a four-minute job.
+      </p>
+
+      <h3>Step 1 — Export the re-sign CA from your fabric</h3>
+      <p>
+        For Cato: open the Cato Management Portal, then navigate to
+        <strong>System → Certificate → Export CA</strong>. Download the
+        certificate (a <code>.crt</code>, <code>.pem</code>, or
+        <code>.cer</code> file) to any convenient location — e.g.
+        <code>~/Downloads/</code>. Menu paths vary slightly by portal
+        version and by vendor; if you're on Zscaler or Palo Alto, look
+        for the equivalent "Root CA" or "Re-Sign Certificate" export.
+      </p>
+
+      <h3>Step 2 — Drop it into hAIrspray's <code>certs/</code> folder</h3>
+      <p>Two equally good ways:</p>
+
+      <p><strong>Finder:</strong></p>
+      <ul>
+        <li>Open Finder</li>
+        <li>Press <code>⌘ ⇧ G</code> (Cmd-Shift-G) to open "Go to Folder"</li>
+        <li>Paste <code>~/Code/hAIrspray/certs</code> and hit Return</li>
+        <li>Drag your exported certificate file into that folder</li>
+      </ul>
+
+      <p><strong>Terminal:</strong></p>
+      <pre>mv ~/Downloads/cato-root-ca.crt ~/Code/hAIrspray/certs/</pre>
+
+      <p class="fineprint">
+        The path <code>~/Code/hAIrspray</code> assumes you followed the
+        macOS quick-start in the project README. If you cloned the repo
+        somewhere else, use that location's <code>certs/</code>
+        subdirectory instead. Filename doesn't matter as long as it
+        ends in <code>.crt</code>, <code>.pem</code>, or <code>.cer</code>.
+        You can drop multiple certificates here (e.g. test fabric + prod
+        fabric) — all of them will be trusted.
+      </p>
+
+      <h3>Step 3 — Rebuild the container</h3>
+      <p>
+        hAIrspray reads the cert at container start, so a rebuild is
+        required. In Terminal:
+      </p>
+      <pre>cd ~/Code/hAIrspray
+docker compose down
+docker compose build --no-cache
+docker compose up -d</pre>
+
+      <h3>Step 4 — Verify it worked</h3>
+      <pre>docker compose logs hairspray | grep tls_</pre>
+      <p>
+        You should see a line with
+        <code>"mode": "custom-bundle"</code> and your filename listed
+        under <code>"extras"</code>. Example:
+      </p>
+      <pre>{"mode": "custom-bundle",
+ "extras": ["cato-root-ca.crt"],
+ "bundle_path": "/tmp/hairspray-ca-bundle.pem",
+ "event": "tls_custom_ca"}</pre>
+      <p>
+        Refresh this page and retry any Prompt & Fire targets that were
+        failing — the <code>CERTIFICATE_VERIFY_FAILED</code> errors
+        should be gone.
+      </p>
+
+      <p class="modal-troubleshoot">
+        <strong>Troubleshooting.</strong> If the log shows
+        <code>"mode": "bypass"</code> instead of
+        <code>"custom-bundle"</code>, the file wasn't picked up.
+        Checklist: file extension is <code>.crt</code>/<code>.pem</code>/<code>.cer</code>;
+        file is in PEM format (starts with
+        <code>-----BEGIN CERTIFICATE-----</code>, not a DER/binary blob);
+        file is readable (<code>chmod 644 certs/*.crt</code>); the
+        bind mount is live — check with <code>docker compose exec hairspray ls /etc/ssl/hairspray-extra-ca/</code>.
+      </p>
+
+      <p class="note">
+        <strong>On Linux hosts</strong> the workflow is identical; the
+        <code>certs/</code> directory lives wherever you cloned the
+        repo (e.g. <code>/opt/ai-spray/certs/</code>). Everything else
+        is the same. Full reference: <code>certs/README.md</code>.
+      </p>
+
+    </div>
+  </div>
 </div>
 
 <nav class="tabs" role="tablist" aria-label="Sections">
@@ -1959,6 +2238,52 @@ function bindLogControls() {
 }
 
 $("#pause-btn").addEventListener("click", togglePause);
+
+// ---------- CERT HELP modal ----------
+// Opens a help panel that explains how to install the SASE re-sign CA
+// into ./certs/ so TLS verification works inside an inspecting fabric.
+// Content is Mac-focused (Cmd+Shift+G Finder path, ~/Code/hAIrspray/…)
+// because that's the most common operator environment; a tail note
+// covers the Linux case. All the markup is static in index.html —
+// this script just handles open/close.
+(() => {
+  const btn     = document.getElementById("cert-help-btn");
+  const modal   = document.getElementById("cert-help-modal");
+  const closeX  = document.getElementById("cert-help-close");
+  if (!btn || !modal || !closeX) return;
+
+  let prevFocus = null;
+
+  function openModal() {
+    prevFocus = document.activeElement;
+    modal.hidden = false;
+    // Lock background scroll so the modal feels modal.
+    document.body.style.overflow = "hidden";
+    // Focus the close button so Tab/Enter/Escape keystrokes have a
+    // sensible starting target for screen-reader / keyboard users.
+    closeX.focus();
+  }
+  function closeModal() {
+    modal.hidden = true;
+    document.body.style.overflow = "";
+    if (prevFocus && typeof prevFocus.focus === "function") {
+      prevFocus.focus();
+    }
+  }
+
+  btn.addEventListener("click", openModal);
+  closeX.addEventListener("click", closeModal);
+  // Click on the dim backdrop (but not inside the panel) closes.
+  modal.addEventListener("click", (ev) => {
+    if (ev.target === modal) closeModal();
+  });
+  // Escape closes from anywhere in the document, but only when the
+  // modal is actually open — we don't want Escape in the prompt
+  // textarea to blow away the modal unexpectedly.
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && !modal.hidden) closeModal();
+  });
+})();
 
 // ================================================================
 // Prompt panel — keyless real-response submission + SSE render
