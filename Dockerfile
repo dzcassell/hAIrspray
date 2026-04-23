@@ -27,6 +27,14 @@ COPY --from=builder /install /usr/local
 # Non-root user.
 RUN useradd --system --create-home --uid 10001 --user-group simulator
 
+# Persistent data directory for the key store. Mode 0700 matches what
+# KeyStore enforces at runtime — belt-and-braces in case the volume
+# driver resets permissions on mount.
+RUN mkdir -p /data \
+ && chown simulator:simulator /data \
+ && chmod 0700 /data
+VOLUME ["/data"]
+
 WORKDIR /app
 COPY app ./app
 

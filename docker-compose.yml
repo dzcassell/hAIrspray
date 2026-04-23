@@ -12,6 +12,11 @@ services:
       # with 127.0.0.1 if you want loopback-only. HEALTH_HOST_PORT
       # defaults to 8090 because 8080 is commonly taken (cadvisor).
       - "${HEALTH_BIND:-0.0.0.0}:${HEALTH_HOST_PORT:-8090}:8080"
+    volumes:
+      # Persistent API key store for keyed prompt providers. Lives in
+      # a named Docker volume so it survives container rebuilds. File
+      # inside is plaintext JSON with mode 0600 — see app/keys.py.
+      - ai-spray-keys:/data
     logging:
       driver: json-file
       options:
@@ -21,3 +26,6 @@ services:
     # traverse the SASE fabric.
     # dns:
     #   - 192.168.40.1
+
+volumes:
+  ai-spray-keys:

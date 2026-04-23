@@ -418,6 +418,95 @@
   .prompt-model .kind-chip.text  { color: var(--cyan);  border-color: #1a3a38; }
   .prompt-model .kind-chip.image { color: var(--ok);    border-color: #1f3a1a; }
 
+  /* Keyed model that doesn't have a saved key yet. */
+  .prompt-model.needs-key {
+    opacity: 0.55;
+  }
+  .prompt-model.needs-key input[type="checkbox"] {
+    pointer-events: none;
+  }
+  .prompt-model .key-hint {
+    font-size: 11px;
+    color: var(--amber);
+    margin-left: 4px;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+  }
+  .prompt-model .key-hint:hover { color: var(--amber-bright); }
+
+  /* ========== Keys panel ========== */
+
+  .keys-help {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+    line-height: 1.5;
+    max-width: 78ch;
+  }
+  .keys-list {
+    display: grid;
+    gap: 8px;
+  }
+  .key-row {
+    display: grid;
+    grid-template-columns: 1fr 2fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    background: var(--chassis-deep);
+  }
+  .key-row.present { border-color: #1f3a1a; }
+  .key-row .key-label {
+    display: flex; flex-direction: column; gap: 2px;
+    min-width: 0;
+  }
+  .key-row .key-label .key-name {
+    font-weight: 600; color: var(--text);
+  }
+  .key-row .key-label .key-meta {
+    font-size: 11px; color: var(--text-dim);
+  }
+  .key-row .key-label .key-meta a {
+    color: var(--amber);
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+  }
+  .key-row .key-label .key-meta a:hover { color: var(--amber-bright); }
+  .key-row .key-input-wrap {
+    display: flex; gap: 6px; align-items: center;
+    min-width: 0;
+  }
+  .key-row input[type="password"],
+  .key-row input[type="text"] {
+    flex: 1; min-width: 0;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); padding: 5px 8px;
+    font-family: inherit; font-size: 12px;
+    border-radius: 2px;
+  }
+  .key-row input:focus {
+    outline: none;
+    border-color: var(--amber-deep);
+    box-shadow: 0 0 0 1px var(--amber-deep);
+  }
+  .key-row .key-preview {
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--ok);
+    padding: 3px 6px;
+    border: 1px solid #1f3a1a;
+    border-radius: 2px;
+    background: rgba(143,211,106,.06);
+  }
+  .key-row .key-actions {
+    display: flex; gap: 6px;
+  }
+
   .prompt-responses {
     margin-top: 16px;
     display: grid;
@@ -986,10 +1075,30 @@
 
 <main>
 
+  <section class="panel full" id="keys-panel" hidden>
+    <div class="head">
+      API Keys<span class="grow"></span>
+      <span class="fade mono" id="keys-status">—</span>
+      <button class="btn small" id="keys-toggle" aria-expanded="false">Show</button>
+    </div>
+    <div class="body" id="keys-body" hidden>
+      <div class="keys-help">
+        Paste a free-tier API key for any of the providers below to
+        unlock its models in the Prompt panel. Keys are stored on
+        disk in a Docker volume (plaintext JSON, mode 0600) and
+        survive container rebuilds. This is a lab tool — keys are
+        readable by anyone with Docker socket access on the host.
+      </div>
+      <div class="keys-list" id="keys-list">
+        <span class="fade mono">loading…</span>
+      </div>
+    </div>
+  </section>
+
   <section class="panel full" id="prompt-panel">
     <div class="head">
       Prompt<span class="grow"></span>
-      <span class="fade">keyless models · real responses</span>
+      <span class="fade">one prompt, many models, real responses</span>
     </div>
     <div class="body">
       <textarea id="prompt-input"
@@ -1691,7 +1800,15 @@ const PromptUI = (() => {
       const r = await fetch("/api/prompt/targets");
       const data = await r.json();
       catalogue = data.targets || [];
-      checked = new Set(catalogue.map(t => t.id));
+      // Default selection: every keyless target, plus keyed targets
+      // that have a saved key. Keyed targets without a key stay
+      // unchecked so pressing Send on a fresh install doesn't fan
+      // out ~40 guaranteed-failing requests.
+      checked = new Set(
+        catalogue
+          .filter(t => !t.needs_key || t.present)
+          .map(t => t.id)
+      );
       renderModelList();
     } catch (e) {
       E.modelsGrid().innerHTML = "";
@@ -1704,17 +1821,31 @@ const PromptUI = (() => {
     const g = E.modelsGrid();
     g.innerHTML = "";
     for (const t of catalogue) {
+      const needsKey = t.needs_key && !t.present;
       const id = "pmodel-" + t.id.replace(/[^a-zA-Z0-9_-]/g, "_");
       const cb = el("input", {type: "checkbox", id});
-      cb.checked = checked.has(t.id);
+      cb.checked = checked.has(t.id) && !needsKey;
+      if (needsKey) cb.disabled = true;
       cb.addEventListener("change", () => {
         if (cb.checked) checked.add(t.id); else checked.delete(t.id);
         updateSendEnabled();
       });
       const kindChip = el("span", {class: "kind-chip " + t.kind}, t.kind);
-      const label = el("label", {for: id, class: "prompt-model"}, [
-        cb, kindChip, document.createTextNode(t.label),
-      ]);
+      const children = [cb, kindChip, document.createTextNode(t.label)];
+      if (needsKey) {
+        // Amber hint that scrolls to the Keys panel and highlights the
+        // relevant row. Using a span (not an <a>) so clicking it doesn't
+        // also toggle the label's associated checkbox.
+        const hint = el("span", {class: "key-hint"}, "🔑 add key");
+        hint.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          if (window.KeysUI) window.KeysUI.focusProvider(t.provider);
+        });
+        children.push(hint);
+      }
+      const labelClass = "prompt-model" + (needsKey ? " needs-key" : "");
+      const label = el("label", {for: id, class: labelClass}, children);
       g.appendChild(label);
     }
     updateSendEnabled();
@@ -1722,16 +1853,11 @@ const PromptUI = (() => {
 
   function setAllChecked(pred) {
     for (const t of catalogue) {
-      if (pred(t)) checked.add(t.id);
-      else         checked.delete(t.id);
+      const needsKey = t.needs_key && !t.present;
+      if (!needsKey && pred(t)) checked.add(t.id);
+      else                      checked.delete(t.id);
     }
-    // Update checkboxes in-place
-    $$("#prompt-models-grid input[type=checkbox]").forEach(cb => {
-      const id = cb.id.replace("pmodel-", "").replace(/_/g, "")
-                 .toLowerCase();
-      // Easier: walk catalogue, find matching dom node by order
-    });
-    renderModelList();  // simpler — re-render with new state
+    renderModelList();  // re-render with new state
   }
 
   function updateSendEnabled() {
@@ -1962,8 +2088,203 @@ const PromptUI = (() => {
       bind();
       await loadCatalogue();
     },
+    // Called by KeysUI after a save/delete so the model grid re-enables
+    // (or greys out) the affected provider's checkboxes.
+    reload: loadCatalogue,
   };
 })();
+
+// ================================================================
+// Keys panel — manage persistent API keys for keyed providers
+// ================================================================
+
+const KeysUI = (() => {
+  let providers = [];   // [{provider, label, signup_url, present, preview}]
+
+  const E = {
+    panel:   () => $("#keys-panel"),
+    body:    () => $("#keys-body"),
+    toggle:  () => $("#keys-toggle"),
+    status:  () => $("#keys-status"),
+    list:    () => $("#keys-list"),
+  };
+
+  async function load() {
+    try {
+      const r = await fetch("/api/keys");
+      const data = await r.json();
+      providers = data.providers || [];
+      render();
+      updateHeaderStatus();
+      // The panel starts hidden; show it once we know there are
+      // keyed providers to manage. Since we always have 14, this
+      // effectively always shows.
+      E.panel().hidden = providers.length === 0;
+    } catch (e) {
+      E.list().innerHTML = "";
+      E.list().appendChild(el("span", {class:"fade mono"},
+        "failed to load keys: " + e));
+    }
+  }
+
+  function updateHeaderStatus() {
+    const present = providers.filter(p => p.present).length;
+    const total = providers.length;
+    E.status().textContent = `${present} / ${total} providers with keys`;
+  }
+
+  function render() {
+    const list = E.list();
+    list.innerHTML = "";
+    for (const p of providers) {
+      list.appendChild(buildRow(p));
+    }
+  }
+
+  function buildRow(p) {
+    const input = el("input", {
+      type: "password",
+      placeholder: p.present ? "(stored — paste to replace)" : "paste API key…",
+      autocomplete: "off",
+      "data-provider": p.provider,
+    });
+    const reveal = el("button", {class: "btn small", title: "toggle visibility"}, "👁");
+    reveal.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      input.type = input.type === "password" ? "text" : "password";
+    });
+    const inputWrap = el("div", {class: "key-input-wrap"}, [input, reveal]);
+
+    const saveBtn = el("button", {class: "btn small"}, "Save");
+    saveBtn.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      const key = input.value.trim();
+      if (!key) {
+        setRowFlash(saveBtn, "paste a key first", true);
+        return;
+      }
+      saveBtn.disabled = true;
+      try {
+        const r = await fetch(`/api/keys/${encodeURIComponent(p.provider)}`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({key}),
+        });
+        if (!r.ok) {
+          let msg = "HTTP " + r.status;
+          try { const j = await r.json(); if (j.error) msg = j.error; } catch {}
+          setRowFlash(saveBtn, msg, true);
+        } else {
+          input.value = "";
+          await load();               // refresh our state
+          await PromptUI.reload();    // and the model-grid enabled-state
+        }
+      } catch (e) {
+        setRowFlash(saveBtn, String(e), true);
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+
+    const clearBtn = el("button", {class: "btn small danger"}, "Clear");
+    clearBtn.disabled = !p.present;
+    clearBtn.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      if (!p.present) return;
+      if (!confirm(`Remove the stored ${p.label} API key?`)) return;
+      clearBtn.disabled = true;
+      try {
+        const r = await fetch(`/api/keys/${encodeURIComponent(p.provider)}`, {
+          method: "DELETE",
+        });
+        if (!r.ok) {
+          let msg = "HTTP " + r.status;
+          try { const j = await r.json(); if (j.error) msg = j.error; } catch {}
+          setRowFlash(clearBtn, msg, true);
+          clearBtn.disabled = false;
+        } else {
+          await load();
+          await PromptUI.reload();
+        }
+      } catch (e) {
+        setRowFlash(clearBtn, String(e), true);
+        clearBtn.disabled = false;
+      }
+    });
+
+    const actions = el("div", {class: "key-actions"}, [saveBtn, clearBtn]);
+
+    const link = el("a", {
+      href: p.signup_url,
+      target: "_blank",
+      rel: "noopener noreferrer",
+    }, "Get a free key ↗");
+    const metaChildren = [link];
+    if (p.present && p.preview) {
+      metaChildren.push(document.createTextNode(" · "));
+      metaChildren.push(el("span", {class: "key-preview"}, p.preview));
+    }
+
+    const labelDiv = el("div", {class: "key-label"}, [
+      el("span", {class: "key-name"}, p.label),
+      el("span", {class: "key-meta"}, metaChildren),
+    ]);
+
+    const row = el("div", {
+      class: "key-row" + (p.present ? " present" : ""),
+      "data-provider": p.provider,
+    }, [labelDiv, inputWrap, actions]);
+    return row;
+  }
+
+  function setRowFlash(btn, msg, isError) {
+    const orig = btn.textContent;
+    btn.textContent = msg.length > 30 ? msg.slice(0, 27) + "…" : msg;
+    btn.style.color = isError ? "var(--err)" : "var(--ok)";
+    setTimeout(() => {
+      btn.textContent = orig;
+      btn.style.color = "";
+    }, 2200);
+  }
+
+  function toggleBody() {
+    const body = E.body();
+    const nowHidden = !body.hidden ? true : false;
+    body.hidden = nowHidden;
+    E.toggle().setAttribute("aria-expanded", String(!nowHidden));
+    E.toggle().textContent = nowHidden ? "Show" : "Hide";
+  }
+
+  function focusProvider(providerId) {
+    // Open panel if collapsed, scroll to the relevant row, focus input.
+    E.body().hidden = false;
+    E.toggle().setAttribute("aria-expanded", "true");
+    E.toggle().textContent = "Hide";
+    const row = E.list().querySelector(
+      `.key-row[data-provider="${CSS.escape(providerId)}"]`
+    );
+    if (row) {
+      row.scrollIntoView({behavior: "smooth", block: "center"});
+      const input = row.querySelector("input");
+      if (input) setTimeout(() => input.focus(), 300);
+    }
+  }
+
+  function bind() {
+    E.toggle().addEventListener("click", toggleBody);
+  }
+
+  return {
+    init: async () => {
+      bind();
+      await load();
+    },
+    focusProvider,
+  };
+})();
+
+// Make KeysUI reachable from PromptUI's "add key" links.
+window.KeysUI = KeysUI;
 
 async function boot() {
   populateCategoryDropdowns();
@@ -1972,6 +2293,7 @@ async function boot() {
   bindLogControls();
   await refreshStatus();
   await refreshTargets();
+  await KeysUI.init();
   await PromptUI.init();
   connectStream();
   setInterval(refreshStatus, 2500);

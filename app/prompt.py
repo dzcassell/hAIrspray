@@ -1,5 +1,5 @@
-"""Prompt mode — send a real user prompt to specific keyless models
-and return structured responses.
+"""Prompt mode — send a real user prompt to specific models and return
+structured responses.
 
 This is a different execution path from the scheduler + fire-all. Those
 paths pick a random benign prompt from ``prompts.py`` and treat any
@@ -8,9 +8,20 @@ prompt mode here takes a user-supplied prompt, targets *specific*
 model/provider pairs, and returns the full response body so the UI can
 render it.
 
-Only keyless providers are exposed: Pollinations (text + image) and
-DuckDuckGo AI Chat. No API keys are accepted from the UI; the scope is
-intentionally narrow.
+Two kinds of providers:
+
+* **Keyless** — Pollinations (text + image) and DuckDuckGo AI Chat.
+  Work out of the box, no account needed. Rate-limited by the upstream.
+* **Keyed** — Free-tier API endpoints from major LLM vendors. The user
+  signs up on the vendor's site, gets a free API key, pastes it into
+  the ai-spray UI. Key is persisted to the key store and passed as
+  ``Authorization: Bearer`` (or vendor-specific header) on each
+  request.
+
+The keyed-provider catalog is in ``KEYED_PROVIDERS`` below; the runner
+dispatches on ``provider``. ``needs_key`` + ``signup_url`` surface in
+``targets_catalogue()`` so the UI can render a "Get a key at ..." link
+for unconfigured providers.
 """
 from __future__ import annotations
 
@@ -59,22 +70,242 @@ PROMPT_TARGETS: list[dict[str, str]] = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Keyed providers — free-tier API endpoints that need a user-supplied key.
+# ---------------------------------------------------------------------------
+#
+# Each entry:
+#   provider    — stable slug used as the key-store id and UI target
+#                 prefix. Matches PROMPT_TARGETS.provider.
+#   label       — human display name
+#   signup_url  — direct link the UI offers for getting a key
+#   models      — list of model ids to expose as individual targets
+#   kind        — "text" (all keyed providers are chat/text only; images
+#                 are keyless-only for now)
+#   shape       — which request runner to use. See _run_keyed_* below.
+#                 "openai-compatible" covers ~80% of modern LLM APIs.
+#                 Vendor-specific shapes (gemini, cohere, anthropic)
+#                 have dedicated runners.
+#   host        — upstream host, used for per-host serialization in
+#                 the fan-out.
+#   extra       — optional provider-specific knobs (base_url override,
+#                 auth header name, api-version, etc.)
+
+KEYED_PROVIDERS: list[dict[str, Any]] = [
+    # --- OpenAI-compatible (Authorization: Bearer <key>, /v1/chat/completions)
+    {
+        "provider": "google",
+        "label":    "Google Gemini",
+        "signup_url": "https://aistudio.google.com/apikey",
+        "shape":    "gemini",   # uses ?key=<key>, custom body shape
+        "host":     "generativelanguage.googleapis.com",
+        "models":   ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro"],
+        "kind":     "text",
+    },
+    {
+        "provider": "groq",
+        "label":    "Groq",
+        "signup_url": "https://console.groq.com/keys",
+        "shape":    "openai-compatible",
+        "host":     "api.groq.com",
+        "extra":    {"base_url": "https://api.groq.com/openai/v1"},
+        "models":   ["llama-3.3-70b-versatile", "llama-3.1-8b-instant",
+                     "mixtral-8x7b-32768"],
+        "kind":     "text",
+    },
+    {
+        "provider": "mistral",
+        "label":    "Mistral AI",
+        "signup_url": "https://console.mistral.ai/api-keys",
+        "shape":    "openai-compatible",
+        "host":     "api.mistral.ai",
+        "extra":    {"base_url": "https://api.mistral.ai/v1"},
+        "models":   ["mistral-small-latest", "mistral-large-latest",
+                     "open-mistral-nemo"],
+        "kind":     "text",
+    },
+    {
+        "provider": "cohere",
+        "label":    "Cohere",
+        "signup_url": "https://dashboard.cohere.com/api-keys",
+        "shape":    "cohere",   # /v2/chat, message field different
+        "host":     "api.cohere.com",
+        "models":   ["command-r", "command-r-plus", "command-r7b"],
+        "kind":     "text",
+    },
+    {
+        "provider": "openrouter",
+        "label":    "OpenRouter",
+        "signup_url": "https://openrouter.ai/keys",
+        "shape":    "openai-compatible",
+        "host":     "openrouter.ai",
+        "extra":    {"base_url": "https://openrouter.ai/api/v1"},
+        "models":   ["google/gemini-flash-1.5:free",
+                     "meta-llama/llama-3.3-70b-instruct:free",
+                     "openai/gpt-4o-mini"],
+        "kind":     "text",
+    },
+    {
+        "provider": "huggingface",
+        "label":    "Hugging Face",
+        "signup_url": "https://huggingface.co/settings/tokens",
+        "shape":    "hf-router",   # router.huggingface.co chat completions
+        "host":     "router.huggingface.co",
+        "extra":    {"base_url": "https://router.huggingface.co/v1"},
+        "models":   ["meta-llama/Llama-3.3-70B-Instruct",
+                     "mistralai/Mistral-7B-Instruct-v0.3",
+                     "Qwen/Qwen2.5-72B-Instruct"],
+        "kind":     "text",
+    },
+    {
+        "provider": "together",
+        "label":    "Together AI",
+        "signup_url": "https://api.together.ai/settings/api-keys",
+        "shape":    "openai-compatible",
+        "host":     "api.together.xyz",
+        "extra":    {"base_url": "https://api.together.xyz/v1"},
+        "models":   ["meta-llama/Llama-3.3-70B-Instruct-Turbo",
+                     "mistralai/Mixtral-8x7B-Instruct-v0.1"],
+        "kind":     "text",
+    },
+    {
+        "provider": "cerebras",
+        "label":    "Cerebras",
+        "signup_url": "https://cloud.cerebras.ai/platform/",
+        "shape":    "openai-compatible",
+        "host":     "api.cerebras.ai",
+        "extra":    {"base_url": "https://api.cerebras.ai/v1"},
+        "models":   ["llama3.1-70b", "llama3.1-8b", "llama-3.3-70b"],
+        "kind":     "text",
+    },
+    {
+        "provider": "sambanova",
+        "label":    "SambaNova",
+        "signup_url": "https://cloud.sambanova.ai/apis",
+        "shape":    "openai-compatible",
+        "host":     "api.sambanova.ai",
+        "extra":    {"base_url": "https://api.sambanova.ai/v1"},
+        "models":   ["Meta-Llama-3.1-70B-Instruct",
+                     "Meta-Llama-3.1-8B-Instruct"],
+        "kind":     "text",
+    },
+    {
+        "provider": "hyperbolic",
+        "label":    "Hyperbolic",
+        "signup_url": "https://app.hyperbolic.xyz/settings",
+        "shape":    "openai-compatible",
+        "host":     "api.hyperbolic.xyz",
+        "extra":    {"base_url": "https://api.hyperbolic.xyz/v1"},
+        "models":   ["meta-llama/Meta-Llama-3.1-70B-Instruct",
+                     "Qwen/Qwen2.5-72B-Instruct"],
+        "kind":     "text",
+    },
+    {
+        "provider": "deepseek",
+        "label":    "DeepSeek",
+        "signup_url": "https://platform.deepseek.com/api_keys",
+        "shape":    "openai-compatible",
+        "host":     "api.deepseek.com",
+        "extra":    {"base_url": "https://api.deepseek.com"},
+        "models":   ["deepseek-chat", "deepseek-reasoner"],
+        "kind":     "text",
+    },
+    {
+        "provider": "xai",
+        "label":    "xAI Grok",
+        "signup_url": "https://console.x.ai/",
+        "shape":    "openai-compatible",
+        "host":     "api.x.ai",
+        "extra":    {"base_url": "https://api.x.ai/v1"},
+        "models":   ["grok-2-latest", "grok-beta"],
+        "kind":     "text",
+    },
+    {
+        "provider": "ai21",
+        "label":    "AI21",
+        "signup_url": "https://studio.ai21.com/account/api-key",
+        "shape":    "openai-compatible",
+        "host":     "api.ai21.com",
+        "extra":    {"base_url": "https://api.ai21.com/studio/v1"},
+        "models":   ["jamba-large", "jamba-mini"],
+        "kind":     "text",
+    },
+    {
+        "provider": "fireworks",
+        "label":    "Fireworks AI",
+        "signup_url": "https://fireworks.ai/account/api-keys",
+        "shape":    "openai-compatible",
+        "host":     "api.fireworks.ai",
+        "extra":    {"base_url": "https://api.fireworks.ai/inference/v1"},
+        "models":   ["accounts/fireworks/models/llama-v3p3-70b-instruct",
+                     "accounts/fireworks/models/mixtral-8x7b-instruct"],
+        "kind":     "text",
+    },
+]
+
+
+def keyed_providers() -> list[dict[str, Any]]:
+    """Return the keyed-provider catalog (shape used by UI)."""
+    return [
+        {
+            "provider":   p["provider"],
+            "label":      p["label"],
+            "signup_url": p["signup_url"],
+            "models":     list(p["models"]),
+            "kind":       p["kind"],
+        }
+        for p in KEYED_PROVIDERS
+    ]
+
+
+def _keyed_entry(provider: str) -> dict[str, Any] | None:
+    for p in KEYED_PROVIDERS:
+        if p["provider"] == provider:
+            return p
+    return None
+
+
 def target_id(provider: str, model: str) -> str:
     """Stable opaque id for (provider, model) pairs used by the UI."""
     return f"{provider}::{model}"
 
 
-def targets_catalogue() -> list[dict[str, str]]:
-    """Shape returned from GET /api/prompt/targets. Stable ids + display labels."""
-    out: list[dict[str, str]] = []
+def targets_catalogue(
+    key_presence: dict[str, bool] | None = None,
+) -> list[dict[str, Any]]:
+    """Shape returned from GET /api/prompt/targets.
+
+    Includes both keyless and keyed provider×model entries. Keyed
+    entries carry ``needs_key=True``, a ``signup_url``, and (if
+    ``key_presence`` is supplied) a ``present`` flag the UI uses to
+    decide whether the checkbox is enabled.
+    """
+    kp = key_presence or {}
+    out: list[dict[str, Any]] = []
+    # Keyless entries — always present, no key needed.
     for t in PROMPT_TARGETS:
         out.append({
-            "id": target_id(t["provider"], t["model"]),
-            "provider": t["provider"],
-            "model": t["model"],
-            "kind": t["kind"],
-            "label": _display_label(t["provider"], t["model"]),
+            "id":        target_id(t["provider"], t["model"]),
+            "provider":  t["provider"],
+            "model":     t["model"],
+            "kind":      t["kind"],
+            "label":     _display_label(t["provider"], t["model"]),
+            "needs_key": False,
+            "present":   True,
         })
+    # Keyed entries — one per (provider, model) pair.
+    for p in KEYED_PROVIDERS:
+        for m in p["models"]:
+            out.append({
+                "id":         target_id(p["provider"], m),
+                "provider":   p["provider"],
+                "model":      m,
+                "kind":       p["kind"],
+                "label":      _display_label(p["provider"], m),
+                "needs_key":  True,
+                "signup_url": p["signup_url"],
+                "present":    bool(kp.get(p["provider"], False)),
+            })
     return out
 
 
@@ -87,6 +318,12 @@ def _display_label(provider: str, model: str) -> str:
         # DDG model strings are long (e.g. "meta-llama/Llama-3.3-70B-Instruct-Turbo")
         short = model.split("/")[-1]
         return f"DuckDuckGo · {short}"
+    # Keyed providers use their display label if we can find one.
+    entry = _keyed_entry(provider)
+    if entry is not None:
+        # Trim long vendor-style model ids for readability in the UI.
+        short = model.split("/")[-1] if "/" in model else model
+        return f"{entry['label']} · {short}"
     return f"{provider} · {model}"
 
 
@@ -308,11 +545,310 @@ def _parse_ddg_stream(raw: str) -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Keyed-provider runners
+# ---------------------------------------------------------------------------
+#
+# All four of these follow the same pattern as the keyless runners: run
+# the request, wall-clock-time it, return a PromptResult. The main
+# difference is that they accept an ``api_key`` argument and set the
+# appropriate auth header / query param. A missing key short-circuits
+# to an error result so the UI can show a clear "add your key" message
+# instead of making a doomed upstream request.
+
+
+def _keyed_missing_key(
+    entry: dict[str, Any], model: str,
+) -> PromptResult:
+    label = f"{entry['label']} · {model}"
+    return PromptResult(
+        target_id=target_id(entry["provider"], model),
+        provider=entry["provider"], model=model,
+        kind="error", label=label,
+        ok=False, status=None, latency_ms=0,
+        url=None,
+        body=(f"no API key configured for {entry['label']}. "
+              f"Click 'add key' in the Keys panel to paste one."),
+    )
+
+
+async def _run_keyed_openai_compatible(
+    client: httpx.AsyncClient,
+    prompt: str,
+    entry: dict[str, Any],
+    model: str,
+    api_key: str,
+) -> PromptResult:
+    """Covers Groq, Mistral, OpenRouter, Together, Cerebras, SambaNova,
+    Hyperbolic, DeepSeek, xAI, AI21, Fireworks — anything speaking the
+    OpenAI /v1/chat/completions shape with Authorization: Bearer."""
+    started = time.monotonic()
+    base_url = entry["extra"]["base_url"]
+    url = f"{base_url}/chat/completions"
+    label = f"{entry['label']} · {model}"
+    tid = target_id(entry["provider"], model)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type":  "application/json",
+        "Accept":        "application/json",
+    }
+    # OpenRouter asks for an identifying header for free-tier rankings.
+    # Harmless on everywhere else.
+    if entry["provider"] == "openrouter":
+        headers["HTTP-Referer"] = "https://github.com/dzcassell/ai-spray"
+        headers["X-Title"]      = "ai-spray"
+    body = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 512,
+    }
+    try:
+        r = await client.post(url, headers=headers, json=body)
+    except httpx.HTTPError as e:
+        return PromptResult(
+            target_id=tid, provider=entry["provider"], model=model,
+            kind="error", label=label,
+            ok=False, status=None,
+            latency_ms=int((time.monotonic() - started) * 1000),
+            url=url, body=f"{type(e).__name__}: {e}",
+        )
+
+    latency = int((time.monotonic() - started) * 1000)
+    if r.status_code != 200:
+        # Try to extract a useful error message from the JSON body.
+        msg = _extract_error_msg(r.text) or f"HTTP {r.status_code}"
+        return PromptResult(
+            target_id=tid, provider=entry["provider"], model=model,
+            kind="error", label=label,
+            ok=False, status=r.status_code, latency_ms=latency,
+            url=url, body=msg,
+        )
+
+    try:
+        data = r.json()
+        text = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, ValueError) as e:
+        return PromptResult(
+            target_id=tid, provider=entry["provider"], model=model,
+            kind="error", label=label,
+            ok=False, status=r.status_code, latency_ms=latency,
+            url=url,
+            body=f"could not parse response: {type(e).__name__}: {e}",
+        )
+
+    return PromptResult(
+        target_id=tid, provider=entry["provider"], model=model,
+        kind="text", label=label,
+        ok=True, status=r.status_code, latency_ms=latency,
+        url=url, body=_trim_text(text),
+        content_type=r.headers.get("content-type"),
+    )
+
+
+async def _run_keyed_gemini(
+    client: httpx.AsyncClient,
+    prompt: str,
+    entry: dict[str, Any],
+    model: str,
+    api_key: str,
+) -> PromptResult:
+    """Google Gemini uses ?key= query param + a generateContent body."""
+    started = time.monotonic()
+    url = (f"https://generativelanguage.googleapis.com/v1beta/"
+           f"models/{model}:generateContent")
+    label = f"{entry['label']} · {model}"
+    tid = target_id(entry["provider"], model)
+    headers = {"Content-Type": "application/json"}
+    body = {
+        "contents":          [{"parts": [{"text": prompt}]}],
+        "generationConfig":  {"maxOutputTokens": 512},
+    }
+    try:
+        r = await client.post(
+            url, headers=headers, params={"key": api_key}, json=body,
+        )
+    except httpx.HTTPError as e:
+        return PromptResult(
+            target_id=tid, provider=entry["provider"], model=model,
+            kind="error", label=label,
+            ok=False, status=None,
+            latency_ms=int((time.monotonic() - started) * 1000),
+            url=url, body=f"{type(e).__name__}: {e}",
+        )
+
+    latency = int((time.monotonic() - started) * 1000)
+    if r.status_code != 200:
+        msg = _extract_error_msg(r.text) or f"HTTP {r.status_code}"
+        return PromptResult(
+            target_id=tid, provider=entry["provider"], model=model,
+            kind="error", label=label,
+            ok=False, status=r.status_code, latency_ms=latency,
+            url=url, body=msg,
+        )
+
+    try:
+        data = r.json()
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError, ValueError) as e:
+        return PromptResult(
+            target_id=tid, provider=entry["provider"], model=model,
+            kind="error", label=label,
+            ok=False, status=r.status_code, latency_ms=latency,
+            url=url,
+            body=f"could not parse response: {type(e).__name__}: {e}",
+        )
+
+    return PromptResult(
+        target_id=tid, provider=entry["provider"], model=model,
+        kind="text", label=label,
+        ok=True, status=r.status_code, latency_ms=latency,
+        url=url, body=_trim_text(text),
+        content_type=r.headers.get("content-type"),
+    )
+
+
+async def _run_keyed_cohere(
+    client: httpx.AsyncClient,
+    prompt: str,
+    entry: dict[str, Any],
+    model: str,
+    api_key: str,
+) -> PromptResult:
+    """Cohere /v2/chat uses Bearer auth but a different body shape."""
+    started = time.monotonic()
+    url = "https://api.cohere.com/v2/chat"
+    label = f"{entry['label']} · {model}"
+    tid = target_id(entry["provider"], model)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type":  "application/json",
+        "Accept":        "application/json",
+    }
+    body = {
+        "model":    model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 512,
+    }
+    try:
+        r = await client.post(url, headers=headers, json=body)
+    except httpx.HTTPError as e:
+        return PromptResult(
+            target_id=tid, provider=entry["provider"], model=model,
+            kind="error", label=label,
+            ok=False, status=None,
+            latency_ms=int((time.monotonic() - started) * 1000),
+            url=url, body=f"{type(e).__name__}: {e}",
+        )
+
+    latency = int((time.monotonic() - started) * 1000)
+    if r.status_code != 200:
+        msg = _extract_error_msg(r.text) or f"HTTP {r.status_code}"
+        return PromptResult(
+            target_id=tid, provider=entry["provider"], model=model,
+            kind="error", label=label,
+            ok=False, status=r.status_code, latency_ms=latency,
+            url=url, body=msg,
+        )
+
+    try:
+        data = r.json()
+        # Cohere v2 response: { message: { content: [ { text: "..." } ] } }
+        text = data["message"]["content"][0]["text"]
+    except (KeyError, IndexError, ValueError) as e:
+        return PromptResult(
+            target_id=tid, provider=entry["provider"], model=model,
+            kind="error", label=label,
+            ok=False, status=r.status_code, latency_ms=latency,
+            url=url,
+            body=f"could not parse response: {type(e).__name__}: {e}",
+        )
+
+    return PromptResult(
+        target_id=tid, provider=entry["provider"], model=model,
+        kind="text", label=label,
+        ok=True, status=r.status_code, latency_ms=latency,
+        url=url, body=_trim_text(text),
+        content_type=r.headers.get("content-type"),
+    )
+
+
+async def _run_keyed_hf_router(
+    client: httpx.AsyncClient,
+    prompt: str,
+    entry: dict[str, Any],
+    model: str,
+    api_key: str,
+) -> PromptResult:
+    """Hugging Face router speaks OpenAI chat-completions over
+    router.huggingface.co/v1. Near-identical to openai-compatible but
+    kept separate in case HF adds headers or routing bits."""
+    # The shape is identical enough that we can delegate.
+    return await _run_keyed_openai_compatible(
+        client, prompt, entry, model, api_key,
+    )
+
+
+def _extract_error_msg(raw_text: str) -> str | None:
+    """Pull a helpful message out of a provider error JSON body.
+
+    Providers disagree on the error shape, so we try several common
+    paths before giving up. Returns None if nothing useful is found.
+    """
+    if not raw_text:
+        return None
+    try:
+        import json as _json
+        data = _json.loads(raw_text)
+    except (ValueError, TypeError):
+        # Not JSON — truncate and return the raw response.
+        return raw_text[:300] if raw_text else None
+
+    # Common locations for error messages across providers.
+    for path in (
+        ("error", "message"),
+        ("error",),
+        ("message",),
+        ("detail",),
+        ("errors", 0, "message"),
+    ):
+        cur: Any = data
+        try:
+            for key in path:
+                cur = cur[key]
+            if isinstance(cur, str):
+                return cur[:300]
+        except (KeyError, IndexError, TypeError):
+            continue
+
+    # Last resort: stringify the whole thing.
+    return _json.dumps(data)[:300]
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
 def validate_target_id(tid: str) -> dict[str, str] | None:
-    """Return the PROMPT_TARGETS entry matching this id, or None."""
+    """Return the target entry matching this id, or None.
+
+    Covers both keyless ``PROMPT_TARGETS`` and keyed provider×model
+    combinations. For keyed targets the returned dict has keys
+    ``{provider, model, kind, keyed: True}`` so the caller can
+    decide whether to look up an API key.
+    """
     for t in PROMPT_TARGETS:
         if target_id(t["provider"], t["model"]) == tid:
             return t
+    # Look through keyed providers.
+    for p in KEYED_PROVIDERS:
+        for m in p["models"]:
+            if target_id(p["provider"], m) == tid:
+                return {
+                    "provider": p["provider"],
+                    "model":    m,
+                    "kind":     p["kind"],
+                    "keyed":    True,
+                }
     return None
 
 
@@ -321,20 +857,55 @@ async def run_prompt_target(
     prompt: str,
     provider: str,
     model: str,
+    api_key: str | None = None,
 ) -> PromptResult:
-    """Dispatch to the right provider runner."""
+    """Dispatch to the right provider runner.
+
+    ``api_key`` is required for keyed providers; if missing the runner
+    returns a clear error PromptResult instead of making the request.
+    """
+    # Keyless first — fast path.
     if provider == "pollinations-text":
         return await _run_pollinations_text(client, prompt, model)
     if provider == "pollinations-image":
         return await _run_pollinations_image(client, prompt, model)
     if provider == "duckduckgo":
         return await _run_duckduckgo(client, prompt, model)
-    # Unknown — shouldn't happen because the endpoint validates first.
+
+    # Keyed providers.
+    entry = _keyed_entry(provider)
+    if entry is None:
+        return PromptResult(
+            target_id=target_id(provider, model),
+            provider=provider, model=model,
+            kind="error",
+            label=_display_label(provider, model),
+            ok=False, status=None, latency_ms=0,
+            url=None, body=f"unknown provider: {provider}",
+        )
+
+    if not api_key:
+        return _keyed_missing_key(entry, model)
+
+    shape = entry["shape"]
+    if shape == "openai-compatible":
+        return await _run_keyed_openai_compatible(
+            client, prompt, entry, model, api_key,
+        )
+    if shape == "gemini":
+        return await _run_keyed_gemini(client, prompt, entry, model, api_key)
+    if shape == "cohere":
+        return await _run_keyed_cohere(client, prompt, entry, model, api_key)
+    if shape == "hf-router":
+        return await _run_keyed_hf_router(
+            client, prompt, entry, model, api_key,
+        )
+
     return PromptResult(
         target_id=target_id(provider, model),
         provider=provider, model=model,
         kind="error",
-        label=_display_label(provider, model),
+        label=f"{entry['label']} · {model}",
         ok=False, status=None, latency_ms=0,
-        url=None, body=f"unknown provider: {provider}",
+        url=None, body=f"unknown request shape: {shape}",
     )

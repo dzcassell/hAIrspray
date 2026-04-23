@@ -36,11 +36,13 @@ from starlette.responses import (
 from starlette.routing import Route
 
 from .prompt import (
+    KEYED_PROVIDERS,
     PROMPT_TARGETS,
     run_prompt_target,
     targets_catalogue,
     validate_target_id,
 )
+from .keys import KeyStore
 from .state import AppState
 
 log = structlog.get_logger()
@@ -121,6 +123,10 @@ def _config_to_dict(cfg) -> dict:
 
 
 def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
+
+    # Shared key store. Lazily loads on first access; file lives in the
+    # Docker volume mounted at /data (configurable via AI_SPRAY_KEYS_PATH).
+    key_store = KeyStore()
 
     # ------------------ UI ------------------
 
@@ -438,7 +444,96 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
     #   scheduler traffic.
 
     async def prompt_targets(request: Request) -> Response:
-        return JSONResponse({"targets": targets_catalogue()})
+        # Inject per-provider key presence so the UI can enable/disable
+        # keyed-provider checkboxes accordingly.
+        summary = await key_store.summary()
+        presence = {
+            prov: bool(v.get("present"))
+            for prov, v in summary["providers"].items()
+        }
+        return JSONResponse({"targets": targets_catalogue(presence)})
+
+    # ------------------ Keys (persistent key store) ------------------
+    #
+    # GET /api/keys
+    #   Returns a summary: which providers have keys, with masked
+    #   previews (never full values). Also returns the full list of
+    #   keyed providers (label + signup_url) so the UI can render the
+    #   Keys panel even before any key is set.
+    #
+    # POST /api/keys/{provider}
+    #   Body: {"key": "<raw-api-key>"}
+    #   Saves (or overwrites) the key for this provider. Provider must
+    #   be one of KEYED_PROVIDERS.
+    #
+    # DELETE /api/keys/{provider}
+    #   Removes the key for this provider.
+    #
+    # All three endpoints return the updated summary.
+
+    async def keys_summary(request: Request) -> Response:
+        summary = await key_store.summary()
+        return JSONResponse({
+            "providers": [
+                {
+                    "provider":   p["provider"],
+                    "label":      p["label"],
+                    "signup_url": p["signup_url"],
+                    "present":    bool(summary["providers"]
+                                       .get(p["provider"], {})
+                                       .get("present")),
+                    "preview":    (summary["providers"]
+                                   .get(p["provider"], {})
+                                   .get("preview")),
+                }
+                for p in KEYED_PROVIDERS
+            ],
+            "path": summary["path"],
+        })
+
+    async def keys_set(request: Request) -> Response:
+        provider = request.path_params["provider"]
+        if not any(p["provider"] == provider for p in KEYED_PROVIDERS):
+            return JSONResponse(
+                {"error": f"unknown provider: {provider}"},
+                status_code=400,
+            )
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return JSONResponse({"error": "invalid JSON"}, status_code=400)
+        key = body.get("key") if isinstance(body, dict) else None
+        if not isinstance(key, str) or not key.strip():
+            return JSONResponse(
+                {"error": "key must be a non-empty string"},
+                status_code=400,
+            )
+        try:
+            await key_store.set(provider, key)
+        except OSError as e:
+            log.error("key_store_write_failed", error=str(e))
+            return JSONResponse(
+                {"error": f"could not save key: {e}"},
+                status_code=500,
+            )
+        return await keys_summary(request)
+
+    async def keys_delete(request: Request) -> Response:
+        provider = request.path_params["provider"]
+        if not any(p["provider"] == provider for p in KEYED_PROVIDERS):
+            return JSONResponse(
+                {"error": f"unknown provider: {provider}"},
+                status_code=400,
+            )
+        try:
+            await key_store.delete(provider)
+        except OSError as e:
+            log.error("key_store_write_failed", error=str(e))
+            return JSONResponse(
+                {"error": f"could not delete key: {e}"},
+                status_code=500,
+            )
+        return await keys_summary(request)
 
     async def prompt_stream(request: Request) -> Response:
         try:
@@ -494,8 +589,16 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
         out_q: asyncio.Queue = asyncio.Queue()
 
         async def _one(entry: dict[str, str]) -> None:
+            # For keyed providers, fetch the stored API key. Missing keys
+            # are handled gracefully by run_prompt_target (returns a
+            # clear error PromptResult). No key lookup for keyless.
+            api_key: str | None = None
+            if entry.get("keyed"):
+                api_key = await key_store.get(entry["provider"])
+
             result = await run_prompt_target(
                 client, prompt_text, entry["provider"], entry["model"],
+                api_key=api_key,
             )
             # Also publish into the main event log so prompt runs
             # surface in the same place as scheduled traffic.
@@ -527,11 +630,18 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
         # so we serialize within each host and only parallelize across
         # hosts. This costs a handful of seconds but produces real
         # responses instead of a wall of rate-limit errors.
+        #
+        # Keyed providers use the 'host' field from KEYED_PROVIDERS so
+        # e.g. all Groq models go through one queue, all Mistral models
+        # through another, etc.
+        _keyed_host_lookup = {p["provider"]: p["host"] for p in KEYED_PROVIDERS}
+
         def _host_key(entry: dict[str, str]) -> str:
             p = entry["provider"]
             if p == "pollinations-text":  return "text.pollinations.ai"
             if p == "pollinations-image": return "image.pollinations.ai"
             if p == "duckduckgo":         return "duckduckgo.com"
+            if p in _keyed_host_lookup:   return _keyed_host_lookup[p]
             return p  # fallback
 
         by_host: dict[str, list[dict[str, str]]] = {}
@@ -603,6 +713,15 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
             },
         )
 
+    # ------------------ Startup / shutdown ------------------
+
+    async def on_startup() -> None:
+        # Preload keys so the first prompt-run doesn't pay a disk
+        # round-trip and so a corrupt keys.json is caught at boot.
+        await key_store.load()
+        loaded = (await key_store.summary())["providers"]
+        log.info("key_store_loaded", count=len(loaded))
+
     routes = [
         Route("/", index),
         Route("/healthz", healthz),
@@ -622,6 +741,9 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
         Route("/api/events/stream", event_stream),
         Route("/api/prompt/targets", prompt_targets),
         Route("/api/prompt/stream", prompt_stream, methods=["POST"]),
+        Route("/api/keys", keys_summary),
+        Route("/api/keys/{provider}", keys_set, methods=["POST"]),
+        Route("/api/keys/{provider}", keys_delete, methods=["DELETE"]),
     ]
 
-    return Starlette(debug=False, routes=routes)
+    return Starlette(debug=False, routes=routes, on_startup=[on_startup])
