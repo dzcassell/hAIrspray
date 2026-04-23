@@ -9,8 +9,10 @@ Type=simple
 Restart=always
 RestartSec=10
 
-# Path to the project directory on the host. Adjust if you place it
-# elsewhere (e.g. /opt/ai-spray if you haven't renamed the checkout yet).
+# Path to the project directory on the host. The README's Linux
+# quick-start clones into /opt/hAIrspray/. Adjust the path below if
+# you cloned somewhere else (e.g. /opt/ai-spray on older installs
+# that predated the rebrand).
 WorkingDirectory=/opt/hAIrspray
 
 # Use `docker compose` v2 (built into Docker Engine). If you still have

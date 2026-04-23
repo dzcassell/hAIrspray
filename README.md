@@ -199,7 +199,14 @@ Four tabs:
   (concurrency-capped) via **⚡ Fire All**.
 - **Config** — scheduler knobs (min/max interval, burst probability,
   burst size, burst gap, category toggles) and the persistent API
-  key store for the 14 keyed providers.
+  key store for the 16 keyed providers (Groq, Mistral, Google
+  Gemini, Cohere, OpenRouter, HuggingFace, Together, Cerebras,
+  SambaNova, Hyperbolic, DeepSeek, xAI, AI21, Fireworks, NVIDIA NIM,
+  GitHub Models). **Dynamic model discovery**: when you save a key,
+  hAIrspray calls the provider's `/v1/models` endpoint with it and
+  caches whatever catalog that key unlocks, so the Prompt grid always
+  renders models your key actually has access to. A **↻** button per
+  row re-runs discovery when a vendor churns their catalog.
 - **Monitor** — live stats (totals, per-category bars, OK vs error
   counts) and an SSE-streamed event log with search, category
   filter, status filter, and NDJSON export.
@@ -283,11 +290,34 @@ and in your SASE's logs at the same layer.
 
 ## Documentation
 
+Code map:
+
 - `app/registry.py` — the 161-probe catalog
 - `app/prompt.py` — the 12 keyless + 16 keyed prompt-capable providers
+- `app/discovery.py` — per-provider `/v1/models` fetchers that power
+  dynamic model discovery (three request shapes: openai-compatible,
+  gemini, cohere)
+- `app/keys.py` — persistent key store (Docker volume, mode-0600
+  JSON, v2 schema with per-provider model cache)
 - `app/config.py` — all `.env` knobs and their defaults
-- `app/web.py` — REST + SSE API surface
+- `app/web.py` — REST + SSE API surface (16 endpoints)
+- `app/main.py` — entry point; the `_resolve_tls_verify()` function
+  at the top picks TLS mode at boot (custom bundle / system / bypass)
+
+Deployment:
+
 - `.env.example` — every tunable with inline notes
+- `Dockerfile` — multi-stage build against `python:3.12-slim`
+  (multi-arch: works on linux/amd64 and linux/arm64)
+- `docker-compose.yml` — named `ai-spray-keys` volume for key
+  persistence; bind-mount of `./certs/` into
+  `/etc/ssl/hairspray-extra-ca:ro` for SASE CA trust
+- `certs/README.md` — how to install your SASE/NGFW re-sign CA so
+  TLS verification works inside an inspecting fabric (also
+  accessible in-app via the **CERT HELP** button in the header)
+- `systemd/hairspray.service` — systemd unit for Linux autostart
+- `macos/` — launchd agent + installer for macOS autostart
+  independent of Docker Desktop's own start-at-login setting
 
 ## License
 

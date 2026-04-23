@@ -27,7 +27,7 @@ shouldn't trust by default).
    arbitrary.
 
    ```bash
-   cp ~/Downloads/cato-root-ca.crt /opt/ai-spray/certs/
+   cp ~/Downloads/cato-root-ca.crt /opt/hAIrspray/certs/
    ```
 
 3. Rebuild the container:

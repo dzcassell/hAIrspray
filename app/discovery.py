@@ -30,7 +30,6 @@ previously cached catalog or fall back to hard-coded defaults.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 import httpx
 
