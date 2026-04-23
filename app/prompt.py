@@ -34,18 +34,23 @@ from .providers import BROWSER_UAS
 # - provider id: "pollinations-text" | "pollinations-image" | "duckduckgo"
 # - model id: the specific model within that provider
 # - kind: "text" | "image"
+#
+# Pollinations model list verified against their 2026 APIDOCS.md
+# (github.com/pollinations/pollinations/blob/main/APIDOCS.md). The
+# older aliases `llama`, `claude`, `qwen`, `flux-realism` were retired
+# when they moved to the gen.pollinations.ai gateway. `kimi` / `deepseek`
+# / `glm` are the current community-listed keyless models.
 PROMPT_TARGETS: list[dict[str, str]] = [
-    # Pollinations text (6 upstream models via their gateway)
-    {"provider": "pollinations-text", "model": "openai",  "kind": "text"},
-    {"provider": "pollinations-text", "model": "mistral", "kind": "text"},
-    {"provider": "pollinations-text", "model": "llama",   "kind": "text"},
-    {"provider": "pollinations-text", "model": "claude",  "kind": "text"},
-    {"provider": "pollinations-text", "model": "gemini",  "kind": "text"},
-    {"provider": "pollinations-text", "model": "qwen",    "kind": "text"},
-    # Pollinations image (3 Flux variants)
-    {"provider": "pollinations-image", "model": "flux",         "kind": "image"},
-    {"provider": "pollinations-image", "model": "flux-realism", "kind": "image"},
-    {"provider": "pollinations-image", "model": "turbo",        "kind": "image"},
+    # Pollinations text — current keyless-tolerant models
+    {"provider": "pollinations-text", "model": "openai",   "kind": "text"},
+    {"provider": "pollinations-text", "model": "mistral",  "kind": "text"},
+    {"provider": "pollinations-text", "model": "kimi",     "kind": "text"},
+    {"provider": "pollinations-text", "model": "deepseek", "kind": "text"},
+    {"provider": "pollinations-text", "model": "glm",      "kind": "text"},
+    # Pollinations image — 2026 roster, keyless-tolerant subset
+    {"provider": "pollinations-image", "model": "flux",       "kind": "image"},
+    {"provider": "pollinations-image", "model": "turbo",      "kind": "image"},
+    {"provider": "pollinations-image", "model": "nanobanana", "kind": "image"},
     # DuckDuckGo AI Chat (4 models via their duckchat gateway)
     {"provider": "duckduckgo", "model": "gpt-4o-mini",                                "kind": "text"},
     {"provider": "duckduckgo", "model": "claude-3-haiku-20240307",                    "kind": "text"},

@@ -1801,7 +1801,26 @@ const PromptUI = (() => {
     if (isPending) {
       body = el("div", {class:"response-body pending-body"}, "waiting…");
     } else if (r.kind === "error" || !r.ok) {
-      const msg = r.body || ("HTTP " + (r.status ?? "transport error"));
+      let msg = r.body || "";
+      if (!msg) {
+        if (r.status === 429) {
+          msg = "Rate-limited by the upstream provider. Try again in a minute, "
+              + "or uncheck a few models before sending (Pollinations limits "
+              + "parallel keyless requests per source IP).";
+        } else if (r.status === 404) {
+          msg = "Model no longer exists on this keyless endpoint. The upstream "
+              + "provider has deprecated it since the ai-spray catalogue was "
+              + "last synced.";
+        } else if (r.status === 402) {
+          msg = "Upstream wants payment now (Pollinations moved this model "
+              + "behind their pollen-credit gateway).";
+        } else if (r.status != null && r.status >= 500) {
+          msg = "Upstream provider error (HTTP " + r.status + "). Usually "
+              + "transient — try again.";
+        } else {
+          msg = "HTTP " + (r.status ?? "transport error");
+        }
+      }
       body = el("div", {class:"response-body error-body"}, msg);
     } else if (r.kind === "image") {
       body = el("div", {class:"response-body image-body"}, [

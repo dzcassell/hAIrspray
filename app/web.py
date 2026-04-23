@@ -491,43 +491,69 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
             target_count=len(selected),
         )
 
-        sem = asyncio.Semaphore(10)
-        # Ordered output queue — runners push as soon as they finish.
         out_q: asyncio.Queue = asyncio.Queue()
 
         async def _one(entry: dict[str, str]) -> None:
-            async with sem:
-                result = await run_prompt_target(
-                    client, prompt_text, entry["provider"], entry["model"],
-                )
-                # Also publish into the main event log so prompt runs
-                # surface in the same place as scheduled traffic.
-                state.publish_result({
-                    "target": result.label,
-                    "category": "real_response",
-                    "method": "POST" if result.provider == "duckduckgo"
-                              else "GET",
-                    "url": result.url or "",
-                    "status": result.status,
-                    "ok": result.ok,
-                    "error": (result.body if result.kind == "error"
-                              else None),
-                    "snippet": (
-                        (result.body[:160] + "…")
-                        if result.kind == "text" and result.body
-                           and len(result.body) > 160
-                        else (result.body if result.kind == "text"
-                              else (f"image {result.content_type or ''}"
-                                    if result.kind == "image" else None))
-                    ),
-                    "source": "prompt",
-                })
-                await out_q.put(result.to_dict())
+            result = await run_prompt_target(
+                client, prompt_text, entry["provider"], entry["model"],
+            )
+            # Also publish into the main event log so prompt runs
+            # surface in the same place as scheduled traffic.
+            state.publish_result({
+                "target": result.label,
+                "category": "real_response",
+                "method": "POST" if result.provider == "duckduckgo"
+                          else "GET",
+                "url": result.url or "",
+                "status": result.status,
+                "ok": result.ok,
+                "error": (result.body if result.kind == "error"
+                          else None),
+                "snippet": (
+                    (result.body[:160] + "…")
+                    if result.kind == "text" and result.body
+                       and len(result.body) > 160
+                    else (result.body if result.kind == "text"
+                          else (f"image {result.content_type or ''}"
+                                if result.kind == "image" else None))
+                ),
+                "source": "prompt",
+            })
+            await out_q.put(result.to_dict())
+
+        # Group requests by upstream host. Pollinations and DDG both
+        # aggressively rate-limit concurrent requests from a single IP
+        # (text.pollinations.ai was returning 429s on 6-way fan-outs),
+        # so we serialize within each host and only parallelize across
+        # hosts. This costs a handful of seconds but produces real
+        # responses instead of a wall of rate-limit errors.
+        def _host_key(entry: dict[str, str]) -> str:
+            p = entry["provider"]
+            if p == "pollinations-text":  return "text.pollinations.ai"
+            if p == "pollinations-image": return "image.pollinations.ai"
+            if p == "duckduckgo":         return "duckduckgo.com"
+            return p  # fallback
+
+        by_host: dict[str, list[dict[str, str]]] = {}
+        for e in selected:
+            by_host.setdefault(_host_key(e), []).append(e)
+
+        async def _host_queue(entries: list[dict[str, str]]) -> None:
+            # Small jitter between requests to the same host helps us
+            # stay under sliding-window rate limits.
+            import random as _r
+            for i, e in enumerate(entries):
+                await _one(e)
+                if i < len(entries) - 1:
+                    await asyncio.sleep(_r.uniform(0.4, 0.9))
 
         async def _orchestrate() -> None:
-            tasks = [asyncio.create_task(_one(e)) for e in selected]
+            host_tasks = [
+                asyncio.create_task(_host_queue(entries))
+                for entries in by_host.values()
+            ]
             try:
-                await asyncio.gather(*tasks, return_exceptions=True)
+                await asyncio.gather(*host_tasks, return_exceptions=True)
             finally:
                 await out_q.put(None)  # sentinel — end of stream
 
