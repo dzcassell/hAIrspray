@@ -248,6 +248,46 @@ KEYED_PROVIDERS: list[dict[str, Any]] = [
         "models":   ["accounts/fireworks/models/llama-v3p3-70b-instruct"],
         "kind":     "text",
     },
+    {
+        # NVIDIA NIM — build.nvidia.com hosted catalog. Signup gets you
+        # 1,000 free inference credits via the NVIDIA Developer Program;
+        # the catalog includes 100+ models (Llama 3/4, Nemotron, DeepSeek
+        # R1, Kimi K2, Qwen 3.5, Mistral). OpenAI-compatible.
+        "provider": "nvidia",
+        "label":    "NVIDIA NIM",
+        "signup_url": "https://build.nvidia.com/",
+        "shape":    "openai-compatible",
+        "host":     "integrate.api.nvidia.com",
+        "extra":    {"base_url": "https://integrate.api.nvidia.com/v1"},
+        "models":   [
+            "meta/llama-3.3-70b-instruct",
+            "deepseek-ai/deepseek-r1",
+            "moonshotai/kimi-k2",
+        ],
+        "kind":     "text",
+    },
+    {
+        # GitHub Models — free tier for every GitHub user (PAT with the
+        # models:read scope). Chat endpoint and catalog live on DIFFERENT
+        # paths: chat at /inference/chat/completions, catalog at
+        # /catalog/models (plain JSON array, not {data:[...]} wrapped).
+        # discovery.py handles both response shapes.
+        "provider": "github",
+        "label":    "GitHub Models",
+        "signup_url": "https://github.com/marketplace/models",
+        "shape":    "openai-compatible",
+        "host":     "models.github.ai",
+        "extra":    {
+            "base_url":      "https://models.github.ai/inference",
+            "discovery_url": "https://models.github.ai/catalog/models",
+        },
+        "models":   [
+            "openai/gpt-4.1",
+            "openai/gpt-4o",
+            "meta/Meta-Llama-3.1-70B-Instruct",
+        ],
+        "kind":     "text",
+    },
 ]
 
 

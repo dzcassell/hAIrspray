@@ -506,10 +506,13 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
         if not api_key:
             return False, 0, "no key stored for this provider"
 
-        base_url = (entry.get("extra") or {}).get("base_url")
+        extra = entry.get("extra") or {}
+        base_url = extra.get("base_url")
+        discovery_url = extra.get("discovery_url")
         try:
             models = await discovery.discover_models(
                 client, entry["shape"], base_url, api_key, timeout=10.0,
+                discovery_url=discovery_url,
             )
         except Exception as e:
             log.warning("discovery_unexpected_exception",

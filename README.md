@@ -256,11 +256,21 @@ and in your SASE's logs at the same layer.
   capable of tripping rate limiters and getting your source IP
   temporarily banned by some providers. Default pacing is
   deliberately slow.
+- **TLS certificate verification is disabled by default**
+  (`TLS_VERIFY=false` in `.env`). This is intentional: hAIrspray is
+  built to run behind SASE fabrics / NGFWs that decrypt HTTPS by
+  re-signing certificates with their own CA, so strict verification
+  against Mozilla's trust store would reject every inspected flow.
+  The trade-off: this container cannot detect MitM impersonation of
+  upstream providers on its own. Only run it where you trust the
+  network path (i.e. inside your SASE/lab, exactly the context this
+  tool is designed for). Flip to `TLS_VERIFY=true` if deploying
+  outside any decrypting fabric.
 
 ## Documentation
 
 - `app/registry.py` — the 161-probe catalog
-- `app/prompt.py` — the 12 keyless + 14 keyed prompt-capable providers
+- `app/prompt.py` — the 12 keyless + 16 keyed prompt-capable providers
 - `app/config.py` — all `.env` knobs and their defaults
 - `app/web.py` — REST + SSE API surface
 - `.env.example` — every tunable with inline notes

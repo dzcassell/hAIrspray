@@ -93,9 +93,18 @@ async def _fetch_openai_compatible(
     base_url: str,
     api_key: str,
     timeout: float,
+    discovery_url: str | None = None,
 ) -> list[str] | None:
-    """GET {base_url}/models returning OpenAI's list schema."""
-    url = f"{base_url.rstrip('/')}/models"
+    """GET {base_url}/models (or an explicit discovery_url) returning
+    OpenAI's list schema.
+
+    Most OpenAI-compatible providers serve their model catalog at
+    ``{base_url}/models``. A few split the two: GitHub Models routes
+    chat at ``models.github.ai/inference`` but the catalog at
+    ``models.github.ai/catalog/models``. Callers that need a different
+    URL pass ``discovery_url``; otherwise we fall back to the default.
+    """
+    url = discovery_url or f"{base_url.rstrip('/')}/models"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Accept":        "application/json",
@@ -247,14 +256,21 @@ async def discover_models(
     base_url: str | None,
     api_key: str,
     timeout: float = 10.0,
+    discovery_url: str | None = None,
 ) -> list[str] | None:
     """Call the right per-shape fetcher and return the filtered,
-    sorted list of chat-capable model IDs, or None on any failure."""
+    sorted list of chat-capable model IDs, or None on any failure.
+
+    ``discovery_url`` overrides the default ``{base_url}/models`` path
+    for OpenAI-compatible providers whose catalog lives on a different
+    host or path than their chat endpoint (e.g. GitHub Models).
+    """
     if shape == "openai-compatible" or shape == "hf-router":
-        if not base_url:
+        if not base_url and not discovery_url:
             return None
         return await _fetch_openai_compatible(
-            client, base_url, api_key, timeout,
+            client, base_url or "", api_key, timeout,
+            discovery_url=discovery_url,
         )
     if shape == "gemini":
         return await _fetch_gemini(client, api_key, timeout)

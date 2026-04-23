@@ -36,6 +36,14 @@ class Config:
     http_timeout: float
     max_concurrent: int
 
+    # TLS — DEFAULT OFF because this tool is specifically designed to run
+    # behind SASE fabrics / NGFWs that decrypt TLS by re-signing certs
+    # with their own CA. Verifying against the container's bundled Mozilla
+    # trust store would fail on every inspected flow. Flip to True only
+    # if you're running hAIrspray outside any MitM inspection (not the
+    # typical case) and want the extra validation.
+    tls_verify: bool
+
     # Observability
     log_level: str
     health_port: int
@@ -65,6 +73,7 @@ class Config:
             enable_real_responses=_bool(os.getenv("ENABLE_REAL_RESPONSES"), True),
             http_timeout=float(os.getenv("HTTP_TIMEOUT_SEC", "30")),
             max_concurrent=int(os.getenv("MAX_CONCURRENT", "1")),
+            tls_verify=_bool(os.getenv("TLS_VERIFY"), False),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
             health_port=int(os.getenv("HEALTH_PORT", "8080")),
         )

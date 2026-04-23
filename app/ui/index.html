@@ -1200,7 +1200,6 @@
   <span id="status-pill" class="pill paused"><span class="dot"></span><span class="label">PAUSED</span></span>
   <button id="pause-btn" class="btn">Pause</button>
   <div class="readouts">
-    <span id="stream-pill" class="pill dead" title="SSE connection"><span class="dot"></span><span class="label">stream</span></span>
     <span class="mono fade" id="uptime">uptime: —</span>
   </div>
 </header>
@@ -1776,8 +1775,10 @@ let evtSrc = null;
 function connectStream() {
   if (evtSrc) evtSrc.close();
   evtSrc = new EventSource("/api/events/stream");
-  evtSrc.onopen = () => setStreamPill(true);
-  evtSrc.onerror = () => setStreamPill(false);
+  // The SSE connection drives Live Log + per-target last_status updates.
+  // We don't surface connection state in the header — the Live Log's own
+  // last-event timestamp plus the uptime counter make the state obvious
+  // enough, and the earlier "stream" pill was more confusing than useful.
   evtSrc.onmessage = (e) => {
     try {
       const ev = JSON.parse(e.data);
@@ -1802,12 +1803,6 @@ function connectStream() {
     } catch {}
   };
 }
-function setStreamPill(live) {
-  const p = $("#stream-pill");
-  p.className = "pill " + (live ? "live" : "dead");
-  p.querySelector(".label").textContent = live ? "stream" : "no stream";
-}
-
 // ---------- wire up ----------
 function bindConfigControls() {
   const bind = (id, parse, field, readoutId, fmt) => {

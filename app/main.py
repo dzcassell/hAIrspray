@@ -129,6 +129,7 @@ async def _main_async() -> int:
         health_port=cfg.health_port,
         enable_real_responses=cfg.enable_real_responses,
         categories=sorted(cfg.categories),
+        tls_verify=cfg.tls_verify,
     )
 
     # Build the full target catalogue; per-category filtering happens
@@ -146,12 +147,32 @@ async def _main_async() -> int:
     limits = httpx.Limits(max_connections=32, max_keepalive_connections=8)
     timeout = httpx.Timeout(cfg.http_timeout, connect=min(10.0, cfg.http_timeout))
 
+    # TLS verification defaults to False because hAIrspray is designed to
+    # run behind SASE fabrics / NGFWs that decrypt-and-re-sign HTTPS with
+    # their own CA. Verifying against Mozilla's trust store would reject
+    # every inspected flow. Set TLS_VERIFY=true if running outside any
+    # MitM inspection. When verify=False, httpx emits no warning of its
+    # own, but we silence the noisy urllib3 one in case any transitive
+    # dep reaches for it.
+    if not cfg.tls_verify:
+        import warnings
+        try:
+            from urllib3.exceptions import InsecureRequestWarning
+            warnings.simplefilter("ignore", InsecureRequestWarning)
+        except Exception:
+            pass
+        log.warning(
+            "tls_verify_disabled",
+            reason="TLS_VERIFY=false; certificate validation skipped. "
+                   "Expected when running behind a TLS-inspecting SASE/NGFW.",
+        )
+
     async with httpx.AsyncClient(
         http2=True,
         limits=limits,
         timeout=timeout,
         follow_redirects=False,
-        verify=True,
+        verify=cfg.tls_verify,
     ) as client:
 
         state = AppState(initial_config=cfg, providers=providers)
