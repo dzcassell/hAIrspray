@@ -53,10 +53,11 @@ AI endpoints** so you can:
   required — 401/403 is fine, the flow is the point.
 - **Real AI responses** for the "Prompt & Fire" flow. Twelve keyless
   model/provider pairs (Pollinations text + image, DuckDuckGo AI Chat)
-  return real completions. Fourteen additional providers unlock real
+  return real completions. Sixteen additional providers unlock real
   responses if you paste free-tier API keys (Gemini, Groq, Mistral,
   Cohere, OpenRouter, HuggingFace, Together, Cerebras, SambaNova,
-  Hyperbolic, DeepSeek, xAI, AI21, Fireworks).
+  Hyperbolic, DeepSeek, xAI, AI21, Fireworks, NVIDIA NIM, GitHub
+  Models).
 - **Configurable pacing**: 30–180s random gaps between probes by
   default, plus optional burst mode (3–7 back-to-back requests at
   1–4s intervals) for session-like patterns.
@@ -300,7 +301,10 @@ Code map:
 - `app/keys.py` — persistent key store (Docker volume, mode-0600
   JSON, v2 schema with per-provider model cache)
 - `app/config.py` — all `.env` knobs and their defaults
-- `app/web.py` — REST + SSE API surface (16 endpoints)
+- `app/web.py` — REST + SSE API surface (`/healthz`, `/metrics`,
+  `/api/status`, `/api/config`, `/api/targets/…`, `/api/fire-all`,
+  `/api/scheduler/…`, `/api/events/stream`, `/api/prompt/…`,
+  `/api/keys/…`)
 - `app/main.py` — entry point; the `_resolve_tls_verify()` function
   at the top picks TLS mode at boot (custom bundle / system / bypass)
 
