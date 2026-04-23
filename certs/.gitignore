@@ -1,0 +1,7 @@
+# Everything in this directory is ignored by git *except* this file
+# itself and README.md. This keeps the directory tracked (so Docker's
+# bind mount target exists) while guaranteeing any actual CA cert
+# files a user drops here stay local and never get pushed to a repo.
+*
+!.gitignore
+!README.md

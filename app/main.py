@@ -51,6 +51,110 @@ log = structlog.get_logger()
 
 
 # ---------------------------------------------------------------------------
+# TLS verification strategy
+# ---------------------------------------------------------------------------
+
+EXTRA_CA_DIR = "/etc/ssl/hairspray-extra-ca"
+COMBINED_BUNDLE_PATH = "/tmp/hairspray-ca-bundle.pem"
+
+
+def _resolve_tls_verify(cfg: Config, log_) -> "bool | str":
+    """Pick the right argument for httpx.AsyncClient(verify=...).
+
+    Returns one of:
+      * str path to a combined CA bundle (certifi + every mounted extra)
+        — used when the operator has dropped a SASE re-sign CA into
+        /etc/ssl/hairspray-extra-ca/. This gives verified HTTPS *and*
+        compatibility with TLS-inspecting fabrics.
+      * True — if no extras are mounted and TLS_VERIFY is truthy; httpx
+        will use its built-in certifi bundle.
+      * False — if no extras are mounted and TLS_VERIFY is falsy;
+        verification is bypassed (compat mode for fabrics we cannot
+        trust a CA for). Also silences urllib3's InsecureRequestWarning
+        since we've explicitly opted out.
+
+    Always emits a single boot-log line identifying which mode won, so
+    operators can diagnose cert problems by reading one grep away.
+    """
+    import os
+    # Inline imports keep module-load cheap on code paths that don't
+    # need them (e.g. in test environments where certifi might not be
+    # present).
+    extra_dir = os.environ.get("HAIRSPRAY_EXTRA_CA_DIR", EXTRA_CA_DIR)
+    extras: list[str] = []
+    if os.path.isdir(extra_dir):
+        extras = sorted(
+            f for f in os.listdir(extra_dir)
+            if f.lower().endswith((".crt", ".pem", ".cer"))
+            and os.path.isfile(os.path.join(extra_dir, f))
+        )
+
+    if extras:
+        try:
+            import certifi
+            with open(COMBINED_BUNDLE_PATH, "w", encoding="utf-8") as out:
+                # System CAs first so their trust anchors take precedence
+                # when the same subject exists in both.
+                with open(certifi.where(), "r", encoding="utf-8") as f:
+                    out.write(f.read())
+                for name in extras:
+                    out.write(f"\n# --- hAIrspray extra CA: {name} ---\n")
+                    with open(os.path.join(extra_dir, name),
+                              "r", encoding="utf-8") as f:
+                        out.write(f.read())
+                    out.write("\n")
+            # Also export SSL_CERT_FILE / REQUESTS_CA_BUNDLE so any
+            # subprocess or transitive library (requests, urllib3,
+            # aiohttp) sees the same trust anchors as httpx does.
+            os.environ["SSL_CERT_FILE"] = COMBINED_BUNDLE_PATH
+            os.environ["REQUESTS_CA_BUNDLE"] = COMBINED_BUNDLE_PATH
+            log_.info(
+                "tls_custom_ca",
+                mode="custom-bundle",
+                extras=extras,
+                bundle_path=COMBINED_BUNDLE_PATH,
+                extra_dir=extra_dir,
+                reason="Extra CA cert(s) found; verification ENABLED "
+                       "against combined certifi + extras bundle. "
+                       "Correct for SASE/NGFW re-sign deployments.",
+            )
+            return COMBINED_BUNDLE_PATH
+        except Exception as e:  # pragma: no cover - defensive
+            log_.error(
+                "tls_custom_ca_failed",
+                error=f"{type(e).__name__}: {e}",
+                extras=extras,
+                hint="Falling back to TLS_VERIFY setting.",
+            )
+
+    if cfg.tls_verify:
+        log_.info(
+            "tls_system_verify",
+            mode="system",
+            reason="TLS_VERIFY=true and no extra CAs mounted; using "
+                   "certifi's built-in Mozilla trust store.",
+        )
+        return True
+
+    # Verify off: silence the noisy urllib3 warning any transitive dep
+    # might reach for.
+    import warnings
+    try:
+        from urllib3.exceptions import InsecureRequestWarning
+        warnings.simplefilter("ignore", InsecureRequestWarning)
+    except Exception:
+        pass
+    log_.warning(
+        "tls_verify_disabled",
+        mode="bypass",
+        reason="TLS_VERIFY=false and no extra CAs mounted; certificate "
+               "validation SKIPPED. The preferred fix is to drop your "
+               "SASE re-sign CA into ./certs/ and rebuild.",
+    )
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Scheduler loop
 # ---------------------------------------------------------------------------
 
@@ -147,32 +251,37 @@ async def _main_async() -> int:
     limits = httpx.Limits(max_connections=32, max_keepalive_connections=8)
     timeout = httpx.Timeout(cfg.http_timeout, connect=min(10.0, cfg.http_timeout))
 
-    # TLS verification defaults to False because hAIrspray is designed to
-    # run behind SASE fabrics / NGFWs that decrypt-and-re-sign HTTPS with
-    # their own CA. Verifying against Mozilla's trust store would reject
-    # every inspected flow. Set TLS_VERIFY=true if running outside any
-    # MitM inspection. When verify=False, httpx emits no warning of its
-    # own, but we silence the noisy urllib3 one in case any transitive
-    # dep reaches for it.
-    if not cfg.tls_verify:
-        import warnings
-        try:
-            from urllib3.exceptions import InsecureRequestWarning
-            warnings.simplefilter("ignore", InsecureRequestWarning)
-        except Exception:
-            pass
-        log.warning(
-            "tls_verify_disabled",
-            reason="TLS_VERIFY=false; certificate validation skipped. "
-                   "Expected when running behind a TLS-inspecting SASE/NGFW.",
-        )
+    # Resolve the TLS verification strategy. Three modes, in priority order:
+    #
+    #   1. CUSTOM CA BUNDLE — if any *.crt / *.pem files are mounted into
+    #      /etc/ssl/hairspray-extra-ca/ (see docker-compose.yml volume
+    #      mapping), concatenate them onto certifi's Mozilla bundle and
+    #      point httpx at the combined file. This is the correct mode for
+    #      SASE / NGFW deployments that decrypt-and-re-sign HTTPS: the
+    #      extra CA is the fabric's re-sign root, so verification passes
+    #      on every inspected flow while still catching anything the
+    #      fabric didn't re-sign.
+    #
+    #   2. FULL SYSTEM VERIFY — if no extras are mounted and TLS_VERIFY
+    #      is truthy, httpx uses the stock certifi bundle. The right
+    #      mode when running outside any inspecting fabric.
+    #
+    #   3. VERIFY OFF — if no extras are mounted and TLS_VERIFY is
+    #      falsy, TLS verification is bypassed entirely. Last-resort
+    #      compatibility mode; use only inside a trusted network path
+    #      since MitM attempts then go unnoticed.
+    #
+    # The boot log always states which mode is active so "why is TLS
+    # still failing" debugging is a matter of reading the first few
+    # lines of `docker compose logs hairspray`.
+    verify_arg = _resolve_tls_verify(cfg, log)
 
     async with httpx.AsyncClient(
         http2=True,
         limits=limits,
         timeout=timeout,
         follow_redirects=False,
-        verify=cfg.tls_verify,
+        verify=verify_arg,
     ) as client:
 
         state = AppState(initial_config=cfg, providers=providers)

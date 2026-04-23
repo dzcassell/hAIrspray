@@ -21,6 +21,15 @@ services:
       # compatibility: renaming it would orphan any keys you already
       # saved under the old project name.
       - ai-spray-keys:/data
+      # Extra CA certificates — primarily for SASE / NGFW deployments
+      # where outbound HTTPS is decrypted and re-signed by a fabric
+      # (Cato, Zscaler, Palo Alto, Netskope, etc.). Drop the fabric's
+      # re-sign root CA (as a .crt or .pem file) into the host-side
+      # ./certs/ directory; main.py picks it up at boot and combines
+      # it with certifi's Mozilla bundle. With the CA trusted this
+      # way, full TLS verification stays ON and TLS_VERIFY can stay
+      # at its default. Read-only mount — container never writes back.
+      - ./certs:/etc/ssl/hairspray-extra-ca:ro
     logging:
       driver: json-file
       options:

@@ -256,16 +256,30 @@ and in your SASE's logs at the same layer.
   capable of tripping rate limiters and getting your source IP
   temporarily banned by some providers. Default pacing is
   deliberately slow.
-- **TLS certificate verification is disabled by default**
-  (`TLS_VERIFY=false` in `.env`). This is intentional: hAIrspray is
-  built to run behind SASE fabrics / NGFWs that decrypt HTTPS by
-  re-signing certificates with their own CA, so strict verification
-  against Mozilla's trust store would reject every inspected flow.
-  The trade-off: this container cannot detect MitM impersonation of
-  upstream providers on its own. Only run it where you trust the
-  network path (i.e. inside your SASE/lab, exactly the context this
-  tool is designed for). Flip to `TLS_VERIFY=true` if deploying
-  outside any decrypting fabric.
+- **TLS verification: three modes in priority order.** Most SASE
+  deployments need the first one.
+  1. **Custom CA bundle (preferred).** Drop your SASE/NGFW re-sign
+     root CA into `./certs/` as a `.crt`, `.pem`, or `.cer` file
+     (see [`certs/README.md`](certs/README.md)). At container boot,
+     it's concatenated with certifi's Mozilla store and httpx is
+     pointed at the combined bundle. You get **full TLS verification
+     on every flow** — including flows re-signed by your fabric, but
+     also catching anything the fabric didn't sign. This is how
+     enterprise-grade tools are meant to live inside an inspecting
+     fabric.
+  2. **Stock verification.** If no extras are in `./certs/` and
+     `TLS_VERIFY=true`, the container verifies against the built-in
+     Mozilla bundle. Correct mode when not behind any inspecting
+     fabric.
+  3. **Verification bypassed.** If no extras are in `./certs/` and
+     `TLS_VERIFY=false` (default), TLS verification is disabled
+     entirely. Compatibility mode; the container cannot detect MitM
+     on its own in this mode, so only use it where you fully trust
+     the network path.
+
+  The boot log always states which mode won. Grep for `tls_custom_ca`,
+  `tls_system_verify`, or `tls_verify_disabled` in
+  `docker compose logs hairspray`.
 
 ## Documentation
 
