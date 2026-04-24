@@ -44,6 +44,7 @@ from .prompt import (
 )
 from .keys import KeyStore
 from . import discovery
+from . import pii
 from .state import AppState
 
 log = structlog.get_logger()
@@ -829,6 +830,200 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
             },
         )
 
+    # ------------------ Profile Tests (DLP) ------------------
+
+    # GET /api/profile-tests/catalog — categories + locales + prompt
+    # types, used by the UI to build the tab.
+    async def profile_tests_catalog(request: Request) -> Response:
+        return JSONResponse({
+            "categories": pii.CATEGORIES,
+            "locales": pii.LOCALES,
+            "prompt_types": pii.PROMPT_TYPES,
+            # Sample one value per category at each locale so the UI
+            # can show a preview of what kind of PII the user is about
+            # to send. Uses seed=0 so previews are stable — actual
+            # fires use fresh non-seeded values.
+            "previews": {
+                cat: {
+                    loc: pii.generate(cat, loc, seed=0)
+                    for loc in pii.LOCALES
+                }
+                for cat in pii.CATEGORIES
+            },
+        })
+
+    # POST /api/profile-tests/fire — SSE stream of DLP test results.
+    # Body: {
+    #   target_id: "provider::model",   # one model, like Prompt & Fire
+    #   categories: [...],              # subset of pii.CATEGORIES
+    #   prompt_types: [...],            # subset of pii.PROMPT_TYPES
+    #   locale: "US" | "UK" | "EU"      # default "US"
+    # }
+    # Emits:
+    #   {kind:"start", total:N}
+    #   {kind:"result", category, prompt_type, locale,
+    #                   sent_value, prompt, response, diff, ok,
+    #                   latency_ms, error?}
+    #   {kind:"end"}
+    async def profile_tests_fire(request: Request) -> Response:
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return JSONResponse({"error": "invalid JSON"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "expected object"}, status_code=400)
+
+        target_id = body.get("target_id")
+        if not isinstance(target_id, str):
+            return JSONResponse(
+                {"error": "target_id must be a string"}, status_code=400,
+            )
+        entry = validate_target_id(target_id)
+        if entry is None:
+            return JSONResponse(
+                {"error": f"unknown target_id: {target_id}"}, status_code=400,
+            )
+
+        categories = body.get("categories") or list(pii.CATEGORIES)
+        if not isinstance(categories, list) or not all(
+            isinstance(c, str) for c in categories
+        ):
+            return JSONResponse(
+                {"error": "categories must be a list of strings"},
+                status_code=400,
+            )
+        for c in categories:
+            if c not in pii.CATEGORIES:
+                return JSONResponse(
+                    {"error": f"unknown category: {c}"}, status_code=400,
+                )
+
+        prompt_types = body.get("prompt_types") or list(pii.PROMPT_TYPES)
+        if not isinstance(prompt_types, list) or not all(
+            isinstance(p, str) for p in prompt_types
+        ):
+            return JSONResponse(
+                {"error": "prompt_types must be a list of strings"},
+                status_code=400,
+            )
+        for p in prompt_types:
+            if p not in pii.PROMPT_TYPES:
+                return JSONResponse(
+                    {"error": f"unknown prompt_type: {p}"}, status_code=400,
+                )
+
+        locale = body.get("locale", "US")
+        if locale not in pii.LOCALES:
+            return JSONResponse(
+                {"error": f"unknown locale: {locale}"}, status_code=400,
+            )
+
+        # Build the full test matrix up front.
+        matrix: list[tuple[str, str, dict[str, Any], str]] = []
+        for cat in categories:
+            for ptype in prompt_types:
+                generated = pii.generate(cat, locale)
+                prompt_text = pii.build_prompt(generated, ptype)
+                matrix.append((cat, ptype, generated, prompt_text))
+
+        log.info(
+            "profile_test_run_started",
+            target=target_id,
+            total=len(matrix),
+            locale=locale,
+            categories=len(categories),
+            prompt_types=len(prompt_types),
+        )
+
+        # Fetch API key once for the chosen target (keyed providers).
+        api_key: str | None = None
+        if entry.get("keyed"):
+            api_key = await key_store.get(entry["provider"])
+            # We don't hard-fail on missing key here — run_prompt_target
+            # will surface a clear "no key" error per-fire which is
+            # actually useful in the UI (user sees exactly which rows
+            # couldn't run instead of a wall of nothing).
+
+        async def gen():
+            start = {"kind": "start", "total": len(matrix), "locale": locale}
+            yield f"data: {json.dumps(start)}\n\n".encode("utf-8")
+
+            import random as _r
+            for i, (cat, ptype, generated, prompt_text) in enumerate(matrix):
+                if await request.is_disconnected():
+                    break
+
+                result = await run_prompt_target(
+                    client, prompt_text,
+                    entry["provider"], entry["model"],
+                    api_key=api_key,
+                )
+
+                # For image responses, the body is a URL not a text
+                # string, so DLP diff doesn't meaningfully apply.
+                response_text: str | None = None
+                if result.kind == "text":
+                    response_text = result.body
+                elif result.kind == "image":
+                    response_text = f"[image: {result.url or ''}]"
+
+                diff = pii.dlp_diff(generated["value"], response_text)
+
+                # Publish an abbreviated event into the main log so
+                # profile tests appear in the Monitor tab alongside
+                # scheduled traffic.
+                state.publish_result({
+                    "target": f"ProfileTest · {generated['label']} · "
+                              f"{ptype} · {result.label}",
+                    "category": "real_response",
+                    "method": "POST",
+                    "url": result.url or "",
+                    "status": result.status,
+                    "ok": result.ok,
+                    "error": (result.body if result.kind == "error"
+                              else None),
+                    "snippet": f"[DLP diff: {diff}]",
+                    "source": "profile-test",
+                })
+
+                event = {
+                    "kind": "result",
+                    "index": i,
+                    "category": cat,
+                    "prompt_type": ptype,
+                    "locale": locale,
+                    "label": generated["label"],
+                    "sent_value": generated["value"],
+                    "prompt": prompt_text,
+                    "response": response_text,
+                    "diff": diff,
+                    "ok": result.ok,
+                    "status": result.status,
+                    "latency_ms": result.latency_ms,
+                    "error": (result.body if result.kind == "error"
+                              else None),
+                }
+                yield f"data: {json.dumps(event)}\n\n".encode("utf-8")
+
+                # Jitter between fires to the same model to stay under
+                # per-minute rate limits. Slightly more aggressive than
+                # the prompt-stream host-serialization since all these
+                # requests hit the same endpoint on the same provider.
+                if i < len(matrix) - 1:
+                    await asyncio.sleep(_r.uniform(0.5, 1.1))
+
+            yield b"data: {\"kind\":\"end\"}\n\n"
+
+        return StreamingResponse(
+            gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
+
     # ------------------ Startup / shutdown ------------------
 
     async def on_startup() -> None:
@@ -857,6 +1052,8 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
         Route("/api/events/stream", event_stream),
         Route("/api/prompt/targets", prompt_targets),
         Route("/api/prompt/stream", prompt_stream, methods=["POST"]),
+        Route("/api/profile-tests/catalog", profile_tests_catalog),
+        Route("/api/profile-tests/fire", profile_tests_fire, methods=["POST"]),
         Route("/api/keys", keys_summary),
         Route("/api/keys/{provider}", keys_set, methods=["POST"]),
         Route("/api/keys/{provider}", keys_delete, methods=["DELETE"]),

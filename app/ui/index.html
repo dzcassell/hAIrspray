@@ -1152,6 +1152,248 @@
   .panel:nth-of-type(4) { animation-delay: 180ms; }
 
   /* -----------------------------------------------------------------
+     Profile Tests tab
+     ----------------------------------------------------------------- */
+  #profile-panel .panel-lede {
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--text-dim);
+    padding: 10px 14px;
+    background: var(--chassis-deep);
+    border-left: 2px solid var(--amber);
+    margin: 0 0 16px;
+    border-radius: 0 3px 3px 0;
+  }
+  #profile-panel .panel-lede strong {
+    color: var(--text);
+  }
+
+  .profile-controls {
+    display: flex;
+    align-items: flex-end;
+    gap: 16px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  .profile-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .profile-field-label {
+    font: 600 10px/1 var(--mono, ui-monospace, Menlo, monospace);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+  .profile-select {
+    background: var(--chassis-deep);
+    border: 1px solid var(--border-hi);
+    color: var(--text);
+    font: 500 12px/1.4 var(--mono, ui-monospace, Menlo, monospace);
+    padding: 5px 9px;
+    border-radius: 2px;
+    min-width: 240px;
+    outline: none;
+  }
+  .profile-select:focus {
+    border-color: var(--amber);
+  }
+
+  .profile-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    margin-bottom: 14px;
+  }
+  .profile-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .profile-table th {
+    background: var(--chassis-deep);
+    color: var(--text-dim);
+    font: 600 10px/1 var(--mono, ui-monospace, Menlo, monospace);
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    padding: 8px 10px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .profile-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: middle;
+  }
+  .profile-table tr:last-child td { border-bottom: 0; }
+  .profile-table tr:hover td {
+    background: rgba(255, 180, 60, 0.04);
+  }
+  .profile-col-check { width: 32px; text-align: center; }
+  .profile-col-cat   { width: 210px; }
+  .profile-col-preview { color: var(--text-dim); font-family: var(--mono, ui-monospace, Menlo, monospace); font-size: 11px; }
+  .profile-col-fire  { text-align: center; width: 80px; }
+  .profile-fire-btn {
+    background: transparent;
+    border: 1px solid var(--border-hi);
+    color: var(--text-dim);
+    padding: 3px 10px;
+    border-radius: 2px;
+    font: 600 10px/1 var(--mono, ui-monospace, Menlo, monospace);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 90ms;
+  }
+  .profile-fire-btn:hover {
+    border-color: var(--amber);
+    color: var(--amber);
+    background: var(--amber-soft);
+  }
+  .profile-empty {
+    text-align: center;
+    color: var(--text-dim);
+    padding: 20px !important;
+    font-style: italic;
+  }
+
+  .profile-progress {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--chassis-deep);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    margin-bottom: 14px;
+    font: 600 11px/1 var(--mono, ui-monospace, Menlo, monospace);
+    color: var(--text);
+  }
+  .profile-progress-bar {
+    flex: 1;
+    height: 6px;
+    background: var(--chassis);
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  #profile-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--amber-deep), var(--amber));
+    width: 0%;
+    transition: width 180ms ease-out;
+  }
+
+  .profile-results {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .profile-card {
+    background: var(--chassis-deep);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--border-hi);
+    border-radius: 3px;
+    padding: 12px 14px;
+    animation: profileCardIn 180ms ease-out;
+  }
+  @keyframes profileCardIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .profile-card.diff-echoed   { border-left-color: #ff6b6b; }
+  .profile-card.diff-partial  { border-left-color: #f0c000; }
+  .profile-card.diff-blocked  { border-left-color: #4ade80; }
+  .profile-card.diff-no_response,
+  .profile-card.diff-error    { border-left-color: var(--text-dim); }
+
+  .profile-card-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .profile-card-title {
+    font: 700 11px/1 var(--mono, ui-monospace, Menlo, monospace);
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+  .profile-card-ptype,
+  .profile-card-latency {
+    font: 500 10px/1 var(--mono, ui-monospace, Menlo, monospace);
+    color: var(--text-dim);
+    padding: 2px 7px;
+    background: var(--chassis);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    letter-spacing: 0.06em;
+  }
+
+  .profile-diff-badge {
+    font: 700 10px/1 var(--mono, ui-monospace, Menlo, monospace);
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 2px;
+    border: 1px solid;
+  }
+  .profile-diff-badge.diff-echoed    { color: #ff6b6b; border-color: #ff6b6b; background: rgba(255,107,107,0.08); }
+  .profile-diff-badge.diff-partial   { color: #f0c000; border-color: #f0c000; background: rgba(240,192,0,0.08); }
+  .profile-diff-badge.diff-blocked   { color: #4ade80; border-color: #4ade80; background: rgba(74,222,128,0.08); }
+  .profile-diff-badge.diff-no_response,
+  .profile-diff-badge.diff-error     { color: var(--text-dim); border-color: var(--border-hi); }
+
+  .profile-card-bodies {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  @media (max-width: 900px) {
+    .profile-card-bodies { grid-template-columns: 1fr; }
+  }
+  .profile-card-side {
+    background: var(--chassis);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    padding: 8px 10px;
+  }
+  .profile-card-sidelabel {
+    font: 600 9px/1 var(--mono, ui-monospace, Menlo, monospace);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+  .profile-card-sidetext {
+    font: 500 11.5px/1.45 var(--mono, ui-monospace, Menlo, monospace);
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .profile-card-sidetext .pii-hi {
+    background: rgba(255,107,107,0.18);
+    color: #ffb4b4;
+    padding: 1px 3px;
+    border-radius: 2px;
+  }
+  .profile-card-error {
+    font: 500 11px/1.4 var(--mono, ui-monospace, Menlo, monospace);
+    color: #ff6b6b;
+    padding: 6px 10px;
+    background: rgba(255,107,107,0.06);
+    border: 1px solid rgba(255,107,107,0.2);
+    border-radius: 2px;
+    margin-top: 8px;
+  }
+
+  /* -----------------------------------------------------------------
      CERT HELP button + modal
      ----------------------------------------------------------------- */
   .cert-help-btn {
@@ -1492,6 +1734,8 @@ docker compose up -d</pre>
           aria-selected="true" aria-controls="tab-prompt">Prompt</button>
   <button class="tab-btn" role="tab" data-tab="probes"
           aria-selected="false" aria-controls="tab-probes">App Probes</button>
+  <button class="tab-btn" role="tab" data-tab="profile"
+          aria-selected="false" aria-controls="tab-profile">Profile Tests</button>
   <button class="tab-btn" role="tab" data-tab="config"
           aria-selected="false" aria-controls="tab-config">Config</button>
   <button class="tab-btn" role="tab" data-tab="monitor"
@@ -1601,6 +1845,101 @@ docker compose up -d</pre>
     </section>
 
   </div><!-- /tab-probes -->
+
+  <!-- ============================================================ -->
+  <!-- Tab: Profile Tests                                           -->
+  <!--   Generates synthetic PII (plausible-but-invalid, passes     -->
+  <!--   checksums) and sends it to a chosen AI model across three  -->
+  <!--   prompt shapes (embedded, paste-to-summarize, echo). Shows  -->
+  <!--   the prompt + response + a DLP-diff badge side-by-side so   -->
+  <!--   the operator can immediately see whether the SASE/NGFW     -->
+  <!--   DLP engine blocked, partially redacted, or let the PII     -->
+  <!--   round-trip untouched.                                      -->
+  <!-- ============================================================ -->
+  <div class="tab-panel" id="tab-profile" role="tabpanel"
+       aria-labelledby="tab-profile-btn">
+
+    <section class="panel full" id="profile-panel">
+      <div class="head">
+        Profile Tests
+        <span class="grow"></span>
+        <span class="tag hint">DLP inspection</span>
+      </div>
+      <div class="body">
+
+        <p class="panel-lede">
+          Generates synthetic PII (plausible-but-invalid, with valid
+          checksums) and sends it to one AI model across three prompt
+          shapes: <strong>embedded</strong> (realistic exfil),
+          <strong>paste</strong> (pasted document), and
+          <strong>echo</strong> (response-side inspection test). Each
+          fire shows prompt + response + a DLP-diff badge so you can
+          see whether PII crossed the wire intact.
+        </p>
+
+        <!-- Controls row: model picker + locale -->
+        <div class="profile-controls">
+          <label class="profile-field">
+            <span class="profile-field-label">Model</span>
+            <select id="profile-model-select" class="profile-select">
+              <option value="">(loading…)</option>
+            </select>
+          </label>
+          <label class="profile-field">
+            <span class="profile-field-label">Locale</span>
+            <select id="profile-locale-select" class="profile-select">
+              <option value="US" selected>US</option>
+              <option value="UK">UK</option>
+              <option value="EU">EU</option>
+            </select>
+          </label>
+          <span class="grow"></span>
+          <button id="profile-fire-all" class="btn primary" type="button">
+            ⚡ Fire All Selected
+          </button>
+          <button id="profile-cancel" class="btn" type="button" hidden>
+            Cancel
+          </button>
+        </div>
+
+        <!-- Category table: 17 rows × 3 prompt-type ⚡ buttons.
+             First column is a checkbox for the category (drives
+             Fire All's selection). -->
+        <div class="profile-table-wrap">
+          <table class="profile-table" id="profile-table">
+            <thead>
+              <tr>
+                <th class="profile-col-check">
+                  <input type="checkbox" id="profile-check-all" checked
+                         title="Select all categories">
+                </th>
+                <th class="profile-col-cat">Category</th>
+                <th class="profile-col-preview">Sample PII (preview)</th>
+                <th class="profile-col-fire" colspan="3">Fire</th>
+              </tr>
+            </thead>
+            <tbody id="profile-tbody">
+              <!-- filled by JS -->
+              <tr><td colspan="6" class="profile-empty">Loading catalog…</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Progress -->
+        <div id="profile-progress" class="profile-progress" hidden>
+          <span id="profile-progress-label">Fired 0 / 0</span>
+          <div class="profile-progress-bar">
+            <div id="profile-progress-fill"></div>
+          </div>
+        </div>
+
+        <!-- Result cards stream in here -->
+        <div id="profile-results" class="profile-results"></div>
+
+      </div>
+    </section>
+
+  </div><!-- /tab-profile -->
 
   <!-- ============================================================ -->
   <!-- Tab 2: Config                                                -->
@@ -2906,6 +3245,430 @@ function initTabs() {
   activate(initial || DEFAULT_TAB);
 }
 
+// ================================================================
+// Profile Tests panel — DLP round-trip testing
+// ================================================================
+// Fires synthetic-PII prompts at one chosen model and renders
+// prompt + response + DLP-diff badge per fire. Uses SSE streaming
+// from /api/profile-tests/fire.
+//
+// Separate from PromptUI because:
+//   * single-model (not fan-out)
+//   * PII comes from the server, not a user textarea
+//   * results need a different card shape (prompt + response side-
+//     by-side, diff badge, highlighting of the PII value within
+//     the response if echoed)
+//   * the category matrix is server-defined, not a checkbox grid
+//     against the model catalogue
+const ProfileUI = (() => {
+  let catalog = null;            // {categories, locales, prompt_types, previews}
+  let modelTargets = [];         // same shape as PromptUI catalogue
+  let cancelController = null;   // AbortController for the in-flight fire
+  let progressCount = 0;
+  let progressTotal = 0;
+
+  async function init() {
+    // Load catalog (PII categories etc) and model list in parallel.
+    try {
+      const [catRes, tgtRes] = await Promise.all([
+        fetch("/api/profile-tests/catalog"),
+        fetch("/api/prompt/targets"),
+      ]);
+      catalog = await catRes.json();
+      const tgtData = await tgtRes.json();
+      modelTargets = tgtData.targets || [];
+    } catch (e) {
+      console.error("ProfileUI init failed:", e);
+      return;
+    }
+
+    populateModelSelect();
+    populateCategoryTable();
+    bindControls();
+  }
+
+  function populateModelSelect() {
+    const sel = document.getElementById("profile-model-select");
+    if (!sel) return;
+    sel.innerHTML = "";
+
+    // Group into keyless and keyed so the dropdown has structure.
+    const keyless = modelTargets.filter(t => !t.needs_key);
+    const keyed   = modelTargets.filter(t => t.needs_key && t.present);
+    const missing = modelTargets.filter(t => t.needs_key && !t.present);
+
+    const mkOpt = (t) => {
+      const o = document.createElement("option");
+      o.value = t.id;
+      o.textContent = t.label;
+      return o;
+    };
+
+    if (keyless.length) {
+      const g = document.createElement("optgroup");
+      g.label = "Keyless (no API key required)";
+      keyless.forEach(t => g.appendChild(mkOpt(t)));
+      sel.appendChild(g);
+    }
+    if (keyed.length) {
+      const g = document.createElement("optgroup");
+      g.label = "Keyed (API key saved)";
+      keyed.forEach(t => g.appendChild(mkOpt(t)));
+      sel.appendChild(g);
+    }
+    if (missing.length) {
+      const g = document.createElement("optgroup");
+      g.label = "Keyed (no key saved — add in Config tab)";
+      missing.forEach(t => {
+        const o = mkOpt(t);
+        o.disabled = true;
+        g.appendChild(o);
+      });
+      sel.appendChild(g);
+    }
+
+    // Default: first keyless option (works without API-key setup).
+    if (keyless.length) sel.value = keyless[0].id;
+    else if (keyed.length) sel.value = keyed[0].id;
+  }
+
+  // Pretty labels for category slugs. Kept in sync with pii.py.
+  const CAT_LABELS = {
+    address: "Address",
+    phone_number: "Phone Number",
+    email: "Email",
+    credit_card: "Credit Card Number",
+    iban: "IBAN",
+    bank_account: "Bank Account Number",
+    swift: "SWIFT Number",
+    drivers_license: "Driver License Number",
+    vehicle_id: "Vehicle ID (VIN)",
+    passport: "Passport Number",
+    national_id: "ID Number / SSN",
+    tax_id: "Tax ID Number",
+    vat_id: "VAT ID Number",
+    health_id: "Health ID Number",
+    crypto_address: "Crypto Address",
+    medical_record_number: "Medical Record Number",
+    health_plan_beneficiary_number: "Health Plan Beneficiary Number",
+  };
+
+  const PTYPE_LABELS = {
+    embedded: "Embed",
+    paste:    "Paste",
+    echo:     "Echo",
+  };
+
+  function populateCategoryTable() {
+    const tbody = document.getElementById("profile-tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+    const locale = document.getElementById("profile-locale-select").value;
+
+    for (const cat of catalog.categories) {
+      const preview = catalog.previews?.[cat]?.[locale]?.value || "";
+      const tr = document.createElement("tr");
+      tr.dataset.category = cat;
+
+      const tdCheck = document.createElement("td");
+      tdCheck.className = "profile-col-check";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.className = "profile-cat-check";
+      cb.dataset.category = cat;
+      cb.checked = true;
+      tdCheck.appendChild(cb);
+      tr.appendChild(tdCheck);
+
+      const tdCat = document.createElement("td");
+      tdCat.className = "profile-col-cat";
+      tdCat.textContent = CAT_LABELS[cat] || cat;
+      tr.appendChild(tdCat);
+
+      const tdPreview = document.createElement("td");
+      tdPreview.className = "profile-col-preview";
+      tdPreview.textContent = preview.length > 52
+          ? preview.slice(0, 49) + "…" : preview;
+      tdPreview.title = preview;
+      tr.appendChild(tdPreview);
+
+      for (const pt of catalog.prompt_types) {
+        const tdFire = document.createElement("td");
+        tdFire.className = "profile-col-fire";
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "profile-fire-btn";
+        btn.textContent = "⚡ " + (PTYPE_LABELS[pt] || pt);
+        btn.dataset.category = cat;
+        btn.dataset.ptype = pt;
+        tdFire.appendChild(btn);
+        tr.appendChild(tdFire);
+      }
+
+      tbody.appendChild(tr);
+    }
+  }
+
+  function selectedCategories() {
+    const boxes = document.querySelectorAll(".profile-cat-check:checked");
+    return Array.from(boxes).map(b => b.dataset.category);
+  }
+
+  function bindControls() {
+    // Locale change: regenerate the preview column.
+    document.getElementById("profile-locale-select")
+      .addEventListener("change", populateCategoryTable);
+
+    // Check-all toggle.
+    document.getElementById("profile-check-all")
+      .addEventListener("change", (ev) => {
+        document.querySelectorAll(".profile-cat-check").forEach(cb => {
+          cb.checked = ev.target.checked;
+        });
+      });
+
+    // Per-row fire (single category × single prompt type).
+    document.getElementById("profile-tbody").addEventListener(
+      "click",
+      (ev) => {
+        const btn = ev.target.closest(".profile-fire-btn");
+        if (!btn) return;
+        fire({
+          categories: [btn.dataset.category],
+          prompt_types: [btn.dataset.ptype],
+        });
+      },
+    );
+
+    // Fire All: every selected category × every prompt type.
+    document.getElementById("profile-fire-all")
+      .addEventListener("click", () => {
+        const cats = selectedCategories();
+        if (cats.length === 0) {
+          alert("Select at least one category first.");
+          return;
+        }
+        fire({
+          categories: cats,
+          prompt_types: catalog.prompt_types,
+        });
+      });
+
+    document.getElementById("profile-cancel")
+      .addEventListener("click", () => {
+        if (cancelController) cancelController.abort();
+      });
+  }
+
+  async function fire({ categories, prompt_types }) {
+    const target_id = document.getElementById("profile-model-select").value;
+    if (!target_id) {
+      alert("Select a model first.");
+      return;
+    }
+    const locale = document.getElementById("profile-locale-select").value;
+
+    // Reset UI.
+    const results = document.getElementById("profile-results");
+    results.innerHTML = "";
+    progressCount = 0;
+    progressTotal = 0;
+    setProgress(0, 0);
+    document.getElementById("profile-progress").hidden = false;
+    document.getElementById("profile-fire-all").disabled = true;
+    document.getElementById("profile-cancel").hidden = false;
+    document.querySelectorAll(".profile-fire-btn").forEach(b => b.disabled = true);
+
+    cancelController = new AbortController();
+    try {
+      const res = await fetch("/api/profile-tests/fire", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          target_id, categories, prompt_types, locale,
+        }),
+        signal: cancelController.signal,
+      });
+      if (!res.ok) {
+        const err = await res.text();
+        alert("Error: " + err);
+        return;
+      }
+      await readSSE(res);
+    } catch (e) {
+      if (e.name !== "AbortError") console.error("profile fire failed:", e);
+    } finally {
+      cancelController = null;
+      document.getElementById("profile-fire-all").disabled = false;
+      document.getElementById("profile-cancel").hidden = true;
+      document.querySelectorAll(".profile-fire-btn").forEach(b => b.disabled = false);
+    }
+  }
+
+  async function readSSE(res) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      // Split into SSE events.
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) !== -1) {
+        const raw = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        if (!raw.startsWith("data:")) continue;
+        const payload = raw.slice(5).trim();
+        if (!payload) continue;
+        try {
+          const ev = JSON.parse(payload);
+          handleEvent(ev);
+        } catch {}
+      }
+    }
+  }
+
+  function handleEvent(ev) {
+    if (ev.kind === "start") {
+      progressTotal = ev.total;
+      progressCount = 0;
+      setProgress(0, ev.total);
+      return;
+    }
+    if (ev.kind === "end") {
+      setProgress(progressCount, progressTotal);
+      return;
+    }
+    if (ev.kind === "result") {
+      renderResult(ev);
+      progressCount++;
+      setProgress(progressCount, progressTotal);
+      return;
+    }
+  }
+
+  function setProgress(n, total) {
+    const lbl = document.getElementById("profile-progress-label");
+    const bar = document.getElementById("profile-progress-fill");
+    if (lbl) lbl.textContent = `Fired ${n} / ${total}`;
+    if (bar) bar.style.width = total > 0 ? `${(n / total) * 100}%` : "0%";
+  }
+
+  function escHtml(s) {
+    return (s || "").replace(/[&<>"]/g, c => ({
+      "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;"
+    }[c]));
+  }
+
+  function highlightPII(text, value) {
+    // Highlight every occurrence of `value` (case-sensitive, as-sent)
+    // inside `text`. Also highlight the value's last 4 digits if they
+    // appear separately — that's the canonical partial-redaction
+    // pattern DLP engines produce.
+    if (!text || !value) return escHtml(text || "");
+    const v = escHtml(value);
+    let out = escHtml(text);
+    // Escape regex metacharacters in the value.
+    const esc = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    out = out.replace(
+      new RegExp(esc.replace(/[.*+?^${}()|[\]\\]/g, m => m), "g"),
+      `<span class="pii-hi">${v}</span>`,
+    );
+    return out;
+  }
+
+  function renderResult(ev) {
+    const results = document.getElementById("profile-results");
+    const card = document.createElement("div");
+    card.className = `profile-card diff-${ev.diff || "no_response"}`;
+
+    // Header row: category label, prompt-type pill, latency, diff badge
+    const head = document.createElement("div");
+    head.className = "profile-card-head";
+
+    const title = document.createElement("span");
+    title.className = "profile-card-title";
+    title.textContent = ev.label || ev.category;
+    head.appendChild(title);
+
+    const pt = document.createElement("span");
+    pt.className = "profile-card-ptype";
+    pt.textContent = (PTYPE_LABELS[ev.prompt_type] || ev.prompt_type) + " · " + (ev.locale || "US");
+    head.appendChild(pt);
+
+    const lat = document.createElement("span");
+    lat.className = "profile-card-latency";
+    lat.textContent = (ev.latency_ms || 0) + " ms";
+    head.appendChild(lat);
+
+    const grow = document.createElement("span");
+    grow.className = "grow";
+    grow.style.flex = "1";
+    head.appendChild(grow);
+
+    const badge = document.createElement("span");
+    badge.className = `profile-diff-badge diff-${ev.diff || "no_response"}`;
+    const diffLabels = {
+      echoed:      "❌ ECHOED",
+      partial:     "⚠ PARTIAL",
+      blocked:     "✓ BLOCKED",
+      no_response: "— NO RESPONSE",
+    };
+    badge.textContent = diffLabels[ev.diff] || ev.diff || "—";
+    head.appendChild(badge);
+
+    card.appendChild(head);
+
+    // Side-by-side prompt + response
+    const bodies = document.createElement("div");
+    bodies.className = "profile-card-bodies";
+
+    const promptSide = document.createElement("div");
+    promptSide.className = "profile-card-side";
+    const promptLbl = document.createElement("div");
+    promptLbl.className = "profile-card-sidelabel";
+    promptLbl.textContent = "Prompt sent";
+    const promptText = document.createElement("div");
+    promptText.className = "profile-card-sidetext";
+    promptText.innerHTML = highlightPII(ev.prompt, ev.sent_value);
+    promptSide.appendChild(promptLbl);
+    promptSide.appendChild(promptText);
+    bodies.appendChild(promptSide);
+
+    const respSide = document.createElement("div");
+    respSide.className = "profile-card-side";
+    const respLbl = document.createElement("div");
+    respLbl.className = "profile-card-sidelabel";
+    respLbl.textContent = "Response received";
+    const respText = document.createElement("div");
+    respText.className = "profile-card-sidetext";
+    if (ev.response) {
+      respText.innerHTML = highlightPII(ev.response, ev.sent_value);
+    } else {
+      respText.style.color = "var(--text-dim)";
+      respText.style.fontStyle = "italic";
+      respText.textContent = "(no response)";
+    }
+    respSide.appendChild(respLbl);
+    respSide.appendChild(respText);
+    bodies.appendChild(respSide);
+
+    card.appendChild(bodies);
+
+    if (ev.error) {
+      const err = document.createElement("div");
+      err.className = "profile-card-error";
+      err.textContent = "Error: " + ev.error;
+      card.appendChild(err);
+    }
+
+    results.appendChild(card);
+  }
+
+  return { init };
+})();
+
 async function boot() {
   initTabs();
   populateCategoryDropdowns();
@@ -2916,6 +3679,7 @@ async function boot() {
   await refreshTargets();
   await KeysUI.init();
   await PromptUI.init();
+  await ProfileUI.init();
   connectStream();
   setInterval(refreshStatus, 2500);
   setInterval(refreshTargets, 10000);
