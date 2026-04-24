@@ -3197,7 +3197,7 @@ const KeysUI = (() => {
 window.KeysUI = KeysUI;
 
 // ================================================================
-// Tabs — Prompt & Fire / Config / Monitor
+// Tabs — Prompt & Fire / App Probes / Profile Tests / Config / Monitor
 // ----------------------------------------------------------------
 // The panels themselves are always in the DOM; we toggle visibility
 // via a `.active` class on each `.tab-panel`. SSE and polling keep
@@ -3205,13 +3205,14 @@ window.KeysUI = KeysUI;
 // always current when the user opens Monitor, and the Stats totals
 // don't lag behind the server.
 //
-// Active tab is synced to the URL hash (#prompt / #config / #monitor)
-// so reloads and shared links land on the same tab. The default is
-// Prompt & Fire — the most common reason to open this UI.
+// Active tab is synced to the URL hash (#prompt / #probes / #profile
+// / #config / #monitor) so reloads and shared links land on the same
+// tab. The default is Prompt & Fire — the most common reason to open
+// this UI.
 // ================================================================
 
 function initTabs() {
-  const VALID = ["prompt", "probes", "config", "monitor"];
+  const VALID = ["prompt", "probes", "profile", "config", "monitor"];
   const DEFAULT_TAB = "prompt";
 
   function activate(name) {
