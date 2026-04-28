@@ -12,7 +12,10 @@ def _bool(value: str | None, default: bool = False) -> bool:
     return value.strip().lower() in ("1", "true", "yes", "on", "y")
 
 
-VALID_CATEGORIES = {"llm_api", "chatbot_ui", "media_gen", "aggregator", "real_response"}
+VALID_CATEGORIES = {
+    "llm_api", "chatbot_ui", "media_gen", "aggregator", "real_response",
+    "mcp_synthetic",
+}
 
 
 @dataclass(frozen=True)
@@ -52,7 +55,7 @@ class Config:
     def from_env(cls) -> "Config":
         raw_cats = os.getenv(
             "CATEGORIES",
-            "llm_api,chatbot_ui,media_gen,aggregator,real_response",
+            "llm_api,chatbot_ui,media_gen,aggregator,real_response,mcp_synthetic",
         )
         cats = {c.strip() for c in raw_cats.split(",") if c.strip()}
         bad = cats - VALID_CATEGORIES

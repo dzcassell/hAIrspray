@@ -29,7 +29,7 @@ The only way to know whether a given vendor's app-ID actually sees
 what it claims to see is to generate realistic traffic at the real
 services and look at what the fabric reports. hAIrspray is that
 traffic generator. It runs as a container behind your SASE fabric (or
-through your NGFW egress) and fires outbound requests at **161 curated
+through your NGFW egress) and fires outbound requests at **178 curated
 AI endpoints** so you can:
 
 - Verify your vendor's app signatures fire for each AI service you
@@ -44,12 +44,15 @@ AI endpoints** so you can:
 
 ## What actually goes out the wire
 
-- **161 probes across 5 categories**: LLM APIs (OpenAI, Anthropic,
+- **178 probes across 6 categories**: LLM APIs (OpenAI, Anthropic,
   Gemini, Groq, Mistral, Cohere, and ~16 more), chatbot UIs (ChatGPT,
   Claude.ai, Gemini Web, Copilot, Character.AI, and ~27 more), media
   generation (Midjourney, Leonardo, Runway, Suno, ElevenLabs, and ~44
   more), aggregators (HuggingFace, Replicate, OpenRouter, Cursor,
-  Lovable, and ~50 more), and a small "real response" set.
+  Lovable, and ~50 more), MCP synthetic traffic (JSON-RPC payloads
+  to reflectors and known public MCP server hostnames — both legacy
+  HTTP+SSE and current Streamable HTTP transports), and a small
+  "real response" set.
 - **Realistic request shapes.** LLM-API probes use SDK-style
   User-Agents (`OpenAI/Python 1.51.0`, `anthropic-python/0.39.0`) and
   the right endpoints, bodies, and auth headers. Chatbot-UI probes
@@ -198,7 +201,7 @@ Four tabs:
   if you saved keys) AI provider at once. Responses stream back
   inline. This is the fastest way to show a SASE demo audience that
   AI DLP either is or isn't inspecting the reply body.
-- **App Probes** — the full 161-entry probe catalog. Filter by name,
+- **App Probes** — the full 178-entry probe catalog. Filter by name,
   URL, or category; enable/disable individual probes; fire a single
   probe, fire an entire category, or fire every enabled probe once
   (concurrency-capped) via **⚡ Fire All**.
@@ -337,7 +340,7 @@ and in your SASE's logs at the same layer.
 
 Code map:
 
-- `app/registry.py` — the 161-probe catalog
+- `app/registry.py` — the 178-probe catalog
 - `app/prompt.py` — the 12 keyless + 16 keyed prompt-capable providers
 - `app/discovery.py` — per-provider `/v1/models` fetchers that power
   dynamic model discovery (three request shapes: openai-compatible,

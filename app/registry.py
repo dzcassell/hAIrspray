@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import mcp
 from .providers import (
     ApiProbe,
     DuckDuckGoChat,
@@ -480,6 +481,112 @@ def _real_response_providers() -> list[Provider]:
 # Public builder
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Category: mcp_synthetic — Model Context Protocol traffic (slice A)
+# ---------------------------------------------------------------------------
+#
+# Generates well-formed MCP JSON-RPC payloads against two destination
+# classes:
+#
+#   * Reflectors (httpbin.org, postman-echo.com) — these don't pretend
+#     to be MCP. The probe tests whether SASE classifies based on
+#     payload shape alone.
+#
+#   * Real public MCP server hostnames, but unauthenticated. The
+#     server returns 401/403 immediately; we don't care about a
+#     successful handshake. What we care about is that the
+#     destination + payload combination produces a classifiable
+#     signal in the inspecting fabric.
+#
+# Both transports (legacy HTTP+SSE and current Streamable HTTP) are
+# represented so SASE coverage of the two wire shapes is testable.
+#
+# The probes use the existing ApiProbe class — no new probe type
+# needed. Just feed it the MCP-shaped body builder and the right
+# Accept header for each transport.
+
+def _mcp_synthetic_probes() -> list[Provider]:
+    """17 MCP probes spanning methods, transports, and destinations."""
+    probes: list[Provider] = []
+
+    # Realistic UA strings — these match what current MCP SDKs emit.
+    UA_PYTHON_SDK = "mcp-python-sdk/1.2.0"
+    UA_TS_SDK     = "@modelcontextprotocol/sdk/1.0.4"
+    UA_INSPECTOR  = "modelcontextprotocol-inspector/0.4.0"
+
+    # ---- (1) Reflector targets — payload-shape classification ----
+    # Six methods × 2 reflectors = 12 probes? Too many. Cover all
+    # six methods on httpbin (the canonical reflector), then a
+    # couple variants on postman-echo for redundancy.
+
+    method_builders = [
+        ("initialize",              mcp.build_initialize_request),
+        ("tools/list",              mcp.build_tools_list_request),
+        ("tools/call",              mcp.random_tool_call_body),
+        ("resources/read",          lambda: mcp.build_resources_read_request("file:///etc/hosts")),
+        ("prompts/get",             lambda: mcp.build_prompts_get_request("summarize")),
+        ("notifications/initialized", mcp.build_initialized_notification),
+    ]
+
+    for method, builder in method_builders:
+        probes.append(ApiProbe(
+            name=f"MCP synthetic ({method}) → reflector",
+            url="https://httpbin.org/post",
+            user_agent=UA_PYTHON_SDK,
+            category="mcp_synthetic",
+            body_builder=lambda _p, b=builder: b(),
+            extra_headers=mcp.headers_for("streamable"),
+            send_fake_auth=False,
+        ))
+
+    # Add the same tools/call shape on the legacy SSE transport so
+    # SASE coverage of both wire conventions is exercised.
+    probes.append(ApiProbe(
+        name="MCP synthetic (tools/call, sse-legacy) → reflector",
+        url="https://postman-echo.com/post",
+        user_agent=UA_TS_SDK,
+        category="mcp_synthetic",
+        body_builder=lambda _p: mcp.random_tool_call_body(),
+        extra_headers=mcp.headers_for("sse-legacy"),
+        send_fake_auth=False,
+    ))
+
+    # ---- (2) Real public MCP server hostnames, unauthenticated ----
+    # Pick a representative slice of the registry: the four most
+    # widely-recognized hosts (GitHub, Cloudflare, Notion, Linear)
+    # plus a few more so SASE has variety to classify against.
+
+    unauth_targets = [
+        ("GitHub MCP",          "https://api.githubcopilot.com/mcp",       "streamable", UA_PYTHON_SDK),
+        ("Cloudflare Docs MCP", "https://docs.mcp.cloudflare.com/sse",     "streamable", UA_TS_SDK),
+        ("Notion MCP",          "https://mcp.notion.com/mcp",              "streamable", UA_PYTHON_SDK),
+        ("Linear MCP",          "https://mcp.linear.app/sse",              "sse-legacy", UA_TS_SDK),
+        ("Atlassian MCP",       "https://mcp.atlassian.com/v1/sse",        "sse-legacy", UA_INSPECTOR),
+        ("Sentry MCP",          "https://mcp.sentry.dev/mcp",              "streamable", UA_PYTHON_SDK),
+        ("Asana MCP",           "https://mcp.asana.com/sse",               "sse-legacy", UA_TS_SDK),
+        ("Stripe MCP",          "https://mcp.stripe.com/v1",               "streamable", UA_PYTHON_SDK),
+        ("Square MCP",          "https://mcp.squareup.com/sse",            "streamable", UA_TS_SDK),
+        ("Block MCP (Goose)",   "https://mcp.block.xyz/sse",               "sse-legacy", UA_TS_SDK),
+    ]
+
+    for name, url, transport, ua in unauth_targets:
+        probes.append(ApiProbe(
+            name=name,
+            url=url,
+            user_agent=ua,
+            category="mcp_synthetic",
+            # initialize is the universal first-message — what every
+            # MCP client sends on session start. Most likely to
+            # produce a classifiable signature, even if the server
+            # immediately 401s for missing auth.
+            body_builder=lambda _p: mcp.build_initialize_request(),
+            extra_headers=mcp.headers_for(transport),
+            send_fake_auth=False,
+        ))
+
+    return probes
+
+
 def build_registry(categories: set[str] | None = None) -> list[Provider]:
     """Return the flat list of providers.
 
@@ -493,6 +600,7 @@ def build_registry(categories: set[str] | None = None) -> list[Provider]:
     all_providers += _media_gen_visits()
     all_providers += _aggregator_targets()
     all_providers += _real_response_providers()
+    all_providers += _mcp_synthetic_probes()
     if categories is None:
         return all_providers
     return [p for p in all_providers if p.category in categories]
