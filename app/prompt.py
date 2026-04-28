@@ -287,6 +287,57 @@ KEYED_PROVIDERS: list[dict[str, Any]] = [
         ],
         "kind":     "text",
     },
+    {
+        # Anthropic — used by the Agents tab (random-sprinkle coder
+        # prompts) via app/agents.py, which knows how to set
+        # 'x-api-key' + 'anthropic-version' headers on /v1/messages.
+        #
+        # IMPORTANT: this entry is marked openai-compatible, but
+        # Anthropic is NOT actually OpenAI-compatible — they use
+        # x-api-key (not Bearer auth) and a different request body
+        # shape. Discovery against /v1/models will currently fail
+        # because discovery.py only sets 'Authorization: Bearer'.
+        # Prompt & Fire fan-out against this entry will likewise
+        # fail. The Agents tab works fine because it has its own
+        # fire path that handles Anthropic's auth correctly.
+        # Marking this as a TODO: add an 'anthropic' shape to
+        # discovery.py so Prompt & Fire / Models discovery work too.
+        "provider": "anthropic",
+        "label":    "Anthropic",
+        "signup_url": "https://console.anthropic.com/settings/keys",
+        "shape":    "openai-compatible",
+        "host":     "api.anthropic.com",
+        "extra":    {"base_url": "https://api.anthropic.com/v1"},
+        "models":   [
+            "claude-sonnet-4-5",
+            "claude-opus-4-5",
+            "claude-haiku-4-5",
+        ],
+        "kind":     "text",
+    },
+    {
+        # Cursor — User API Key from the Cursor Integrations Dashboard.
+        # The official API is at api.cursor.com/v0/* (verified April
+        # 2026 — earlier hAIrspray builds had api2.cursor.sh which is
+        # the legacy session-token endpoint, not the public API key
+        # surface). Auth: Authorization: Bearer <token>. Used primarily
+        # by the Agents tab; appears in Prompt & Fire for parity though
+        # Cursor's API is closer to its own bespoke surface than to
+        # OpenAI chat-completions, so Prompt & Fire fan-outs against
+        # it may behave oddly until/unless we add a per-shape runner.
+        "provider": "cursor",
+        "label":    "Cursor",
+        "signup_url": "https://cursor.com/dashboard?tab=integrations",
+        "shape":    "openai-compatible",
+        "host":     "api.cursor.com",
+        "extra":    {"base_url": "https://api.cursor.com/v0"},
+        "models":   [
+            "auto",  # Cursor's default routing
+            "claude-sonnet-4-5",
+            "gpt-4o",
+        ],
+        "kind":     "text",
+    },
 ]
 
 

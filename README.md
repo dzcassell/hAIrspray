@@ -6,7 +6,7 @@ and control them.**
 
 ![hAIrspray Prompt tab — 160 AI text and image models in one grid, one prompt, real streamed responses side by side.](docs/screenshot-prompt.jpg)
 
-<sub>Prompt & Fire — one prompt, 160 model/provider pairs, real responses streamed back inline. 12 keyless providers (Pollinations, DuckDuckGo AI Chat), 16 keyed free-tier providers (Gemini, Groq, Mistral, Cohere, OpenRouter, HuggingFace, Together, Cerebras, SambaNova, Hyperbolic, DeepSeek, xAI, AI21, Fireworks, NVIDIA NIM, GitHub Models). Live dynamic-discovery populates the grid with whatever models each key actually unlocks.</sub>
+<sub>Prompt & Fire — one prompt, 160 model/provider pairs, real responses streamed back inline. 12 keyless providers (Pollinations, DuckDuckGo AI Chat), 18 keyed free-tier providers (Gemini, Groq, Mistral, Cohere, OpenRouter, HuggingFace, Together, Cerebras, SambaNova, Hyperbolic, DeepSeek, xAI, AI21, Fireworks, NVIDIA NIM, GitHub Models, Anthropic, Cursor). Live dynamic-discovery populates the grid with whatever models each key actually unlocks.</sub>
 
 Vendors claim AI-app visibility. hAIrspray lets you find out. Point it
 at your corporate egress, enable the probes relevant to your test, and
@@ -62,11 +62,11 @@ AI endpoints** so you can:
   required — 401/403 is fine, the flow is the point.
 - **Real AI responses** for the "Prompt & Fire" flow. Twelve keyless
   model/provider pairs (Pollinations text + image, DuckDuckGo AI Chat)
-  return real completions. Sixteen additional providers unlock real
+  return real completions. Eighteen additional providers unlock real
   responses if you paste free-tier API keys (Gemini, Groq, Mistral,
   Cohere, OpenRouter, HuggingFace, Together, Cerebras, SambaNova,
   Hyperbolic, DeepSeek, xAI, AI21, Fireworks, NVIDIA NIM, GitHub
-  Models).
+  Models, Anthropic, Cursor).
 - **File uploads** in Prompt & Fire. Attach a `.txt` / `.md` / `.csv`
   / `.json` / `.pdf` / `.docx` / `.xlsx` / source-code file (or any
   supported text format) and the extracted content rides along in
@@ -228,12 +228,27 @@ Five tabs:
   switches between standard chat-completion bodies and MCP
   `tools/call` envelopes — the latter tests whether your DLP engine
   actually parses MCP payloads or treats them as opaque JSON.
+- **Agents** — random-sprinkle coder prompts at Anthropic Claude and
+  Cursor every 60–120 seconds (configurable). Pick a prompt matrix
+  (10 prompts spanning Q&A / code-gen / review / refactor / debug /
+  architecture genres), pick which providers participate, click
+  Fire, and the loop runs server-side until you click Stop. Realistic
+  agentic-AI traffic that increasingly enterprise SASE/NGFW vendors
+  claim to identify. If the `claude` CLI binary is on the container's
+  PATH at startup, Anthropic fires use the real subprocess (matching
+  wire shape down to the SDK's specific batching behavior); otherwise
+  it falls back to direct `/v1/messages` API calls with a
+  `claude-cli` User-Agent. Cursor always goes via API on
+  `api2.cursor.sh` with a `cursor-agent` UA — installing the Cursor
+  binary in a long-running container is operationally fragile (it
+  auto-updates on every launch).
 - **Config** — scheduler knobs (min/max interval, burst probability,
   burst size, burst gap, category toggles) and the persistent key
-  store. Sixteen keyed AI providers (Groq, Mistral, Gemini, Cohere,
+  store. Eighteen keyed AI providers (Groq, Mistral, Gemini, Cohere,
   OpenRouter, HuggingFace, Together, Cerebras, SambaNova, Hyperbolic,
-  DeepSeek, xAI, AI21, Fireworks, NVIDIA NIM, GitHub Models) plus
-  three keyed MCP servers (GitHub MCP, Notion MCP, Linear MCP).
+  DeepSeek, xAI, AI21, Fireworks, NVIDIA NIM, GitHub Models, Anthropic,
+  Cursor) plus three keyed MCP servers (GitHub MCP, Notion MCP, Linear
+  MCP).
   **Dynamic model discovery**: when you save an AI key, hAIrspray
   calls the provider's `/v1/models` endpoint with it and caches
   whatever catalog that key unlocks, so the Prompt grid always
@@ -282,6 +297,36 @@ documentation to find where they hid it. Expected total time to
 populate the whole panel from scratch on a fresh Gmail account:
 roughly 20–30 minutes, most of which is clicking through sign-up
 flows rather than anything hAIrspray-specific.
+
+## Optional: install the real Claude CLI for the Agents tab
+
+The Agents tab will fire prompts at Anthropic via the API by default
+(`claude-cli` User-Agent on a `/v1/messages` POST). If you'd rather
+have the *real* `claude` binary in the container — same wire shape
+the Anthropic Claude Code CLI emits in its day-job — install it in
+your derived image:
+
+```dockerfile
+# In a Dockerfile that FROM's hAIrspray:
+RUN apt-get update && apt-get install -y nodejs npm && \
+    npm install -g @anthropic-ai/claude-code && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+```
+
+At startup, hAIrspray runs `shutil.which("claude")` once. If it
+finds the binary on PATH, the Agents tab's Anthropic checkbox
+shows `(real CLI)` next to it and fires invoke `claude -p "..."`
+as a subprocess. Without the binary the checkbox shows `(api)`
+and fires go to the API directly. Either way the SASE/NGFW
+classification target is the same.
+
+The Cursor binary is deliberately **not** supported as a
+subprocess path. `cursor-agent` auto-updates aggressively on every
+launch, which generates noisy classifiable traffic of its own and
+breaks predictable container behavior. If you want to test that
+pattern specifically, install Cursor on your dev workstation
+behind the same fabric and let it update there — hAIrspray won't
+get in the way.
 
 ## Typical SASE/NGFW test workflow
 
@@ -365,7 +410,7 @@ and in your SASE's logs at the same layer.
 Code map:
 
 - `app/registry.py` — the 181-probe catalog
-- `app/prompt.py` — the 12 keyless + 16 keyed prompt-capable providers
+- `app/prompt.py` — the 12 keyless + 18 keyed prompt-capable providers
 - `app/discovery.py` — per-provider `/v1/models` fetchers that power
   dynamic model discovery (three request shapes: openai-compatible,
   gemini, cohere)
@@ -381,6 +426,12 @@ Code map:
 - `app/mcp.py` — MCP JSON-RPC envelope builders, transport headers,
   public-server registry; underpins the synthetic + authed MCP
   probes and the slice-C MCP-payload-shape DLP toggle
+- `app/agents.py` — Agents tab: predefined coder-prompt matrix, the
+  Anthropic + Cursor dispatchers, and the random-sprinkle loop. If
+  the `claude` CLI binary is present at startup, Anthropic fires
+  use the real subprocess; otherwise direct API call with a
+  `claude-cli` User-Agent. Cursor is always API-only via
+  `api2.cursor.sh`.
 - `app/config.py` — all `.env` knobs and their defaults
 - `app/web.py` — REST + SSE API surface (`/healthz`, `/metrics`,
   `/api/status`, `/api/config`, `/api/targets/…`, `/api/fire-all`,

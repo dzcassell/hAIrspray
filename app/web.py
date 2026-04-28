@@ -1262,6 +1262,145 @@ def create_app(
             },
         )
 
+    # ------------------ Agents (random-sprinkle coder prompts) ----------
+
+    # GET /api/agents/catalog — what prompts exist; UI populates the
+    # checkbox matrix from this. Static (no per-user state).
+    async def agents_catalog(request: Request) -> Response:
+        from . import agents
+        return JSONResponse({
+            "prompts":   agents.PROMPTS,
+            "providers": list(agents.PROVIDERS),
+            "genres":    list(agents.PROMPT_GENRES),
+            "claude_cli_available": agents.claude_cli_available(),
+        })
+
+    # GET /api/agents/status — current loop state (running flag,
+    # total fired, recent fire history). UI polls this every few
+    # seconds so it doesn't need a separate SSE channel.
+    async def agents_status(request: Request) -> Response:
+        return JSONResponse(state.agent_loop.status())
+
+    # POST /api/agents/start — start the random-sprinkle loop.
+    # Body: {min_gap_sec?, max_gap_sec?, prompts?, providers?}
+    # All four optional; missing values use the existing AgentLoopState
+    # defaults / current values. If the loop is already running, this
+    # updates the gap range and enabled sets in-place rather than
+    # restarting.
+    async def agents_start(request: Request) -> Response:
+        from . import agents
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+
+        loop_state = state.agent_loop
+
+        # Validate + apply optional knobs.
+        min_gap = body.get("min_gap_sec")
+        max_gap = body.get("max_gap_sec")
+        if min_gap is not None:
+            if not isinstance(min_gap, int) or min_gap < 5:
+                return JSONResponse(
+                    {"error": "min_gap_sec must be an int >= 5"},
+                    status_code=400,
+                )
+            loop_state.min_gap_sec = min_gap
+        if max_gap is not None:
+            if not isinstance(max_gap, int) or max_gap < loop_state.min_gap_sec:
+                return JSONResponse(
+                    {"error": (f"max_gap_sec must be an int >= "
+                               f"min_gap_sec ({loop_state.min_gap_sec})")},
+                    status_code=400,
+                )
+            loop_state.max_gap_sec = max_gap
+
+        prompts = body.get("prompts")
+        if prompts is not None:
+            if (not isinstance(prompts, list)
+                    or not all(isinstance(p, str) for p in prompts)):
+                return JSONResponse(
+                    {"error": "prompts must be a list of slug strings"},
+                    status_code=400,
+                )
+            valid = set(agents.PROMPT_BY_SLUG.keys())
+            unknown = [p for p in prompts if p not in valid]
+            if unknown:
+                return JSONResponse(
+                    {"error": f"unknown prompt slug(s): {unknown}"},
+                    status_code=400,
+                )
+            loop_state.enabled_prompts = set(prompts)
+
+        providers = body.get("providers")
+        if providers is not None:
+            if (not isinstance(providers, list)
+                    or not all(isinstance(p, str) for p in providers)):
+                return JSONResponse(
+                    {"error": "providers must be a list of strings"},
+                    status_code=400,
+                )
+            valid = set(agents.PROVIDERS)
+            unknown = [p for p in providers if p not in valid]
+            if unknown:
+                return JSONResponse(
+                    {"error": f"unknown provider(s): {unknown}; "
+                              f"valid: {sorted(valid)}"},
+                    status_code=400,
+                )
+            loop_state.enabled_providers = set(providers)
+
+        # If already running, the in-place updates above are enough —
+        # the loop reads enabled_* on every iteration. Don't kick off
+        # a second task.
+        if loop_state.running and loop_state.task and not loop_state.task.done():
+            return JSONResponse({
+                "ok": True,
+                "already_running": True,
+                "status": loop_state.status(),
+            })
+
+        # Spin up the loop. The task captures `state.agent_loop`,
+        # `client`, and the key store (for per-fire key lookup).
+        async def _runner() -> None:
+            try:
+                await agents.run_loop(loop_state, client, key_store)
+            except asyncio.CancelledError:
+                # Expected on stop — let it propagate so the task
+                # registers as cancelled.
+                raise
+            except Exception as e:  # noqa: BLE001
+                log.exception("agent_loop_crashed", error=str(e))
+
+        loop_state.task = asyncio.create_task(_runner())
+        return JSONResponse({
+            "ok": True,
+            "already_running": False,
+            "status": loop_state.status(),
+        })
+
+    # POST /api/agents/stop — cancel the current loop. Idempotent —
+    # safe to call when the loop isn't running.
+    async def agents_stop(request: Request) -> Response:
+        loop_state = state.agent_loop
+        if loop_state.task is not None and not loop_state.task.done():
+            loop_state.task.cancel()
+            # Wait briefly for the cancel to land so the next status
+            # call shows running=false. Don't wait forever — if the
+            # task is wedged, return anyway and let the operator try
+            # again.
+            try:
+                await asyncio.wait_for(loop_state.task, timeout=3.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+        # Defensive: clear the running flag in case the task was
+        # already done but not noticed.
+        loop_state.running = False
+        loop_state.task = None
+        return JSONResponse({"ok": True, "status": loop_state.status()})
+
     # ------------------ Startup / shutdown ------------------
 
     async def on_startup() -> None:
@@ -1297,6 +1436,11 @@ def create_app(
         Route("/api/keys/{provider}", keys_set, methods=["POST"]),
         Route("/api/keys/{provider}", keys_delete, methods=["DELETE"]),
         Route("/api/keys/{provider}/refresh", keys_refresh, methods=["POST"]),
+
+        Route("/api/agents/catalog", agents_catalog),
+        Route("/api/agents/status",  agents_status),
+        Route("/api/agents/start",   agents_start, methods=["POST"]),
+        Route("/api/agents/stop",    agents_stop,  methods=["POST"]),
     ]
 
     return Starlette(debug=False, routes=routes, on_startup=[on_startup])

@@ -1609,6 +1609,165 @@
     .modal-body h3  { font-size: 10.5px; }
   }
 
+  /* -----------------------------------------------------------------
+     Agents tab — random-sprinkle coder prompts
+     ----------------------------------------------------------------- */
+  .agents-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px 18px;
+    padding: 12px 14px;
+    background: var(--chassis-deep);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    margin: 12px 0 18px;
+  }
+  .agents-num {
+    width: 64px;
+    background: var(--chassis);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 6px;
+    font: 500 12px var(--ff-mono);
+    border-radius: 2px;
+  }
+  .agents-cb {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-right: 12px;
+    font: 500 12px var(--ff-mono);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .agents-prompts {
+    background: var(--chassis-deep);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    margin-bottom: 18px;
+  }
+  .agents-prompts-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font: 500 11px var(--ff-mono);
+    color: var(--text);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .agents-prompts-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 18px;
+    padding: 10px 14px;
+  }
+  @media (max-width: 720px) {
+    .agents-prompts-grid { grid-template-columns: 1fr; }
+  }
+  .agents-prompt-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 12.5px;
+  }
+  .agents-prompt-row label {
+    cursor: pointer;
+    color: var(--text);
+    flex: 1;
+  }
+  .agents-prompt-row .genre-chip {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 2px;
+    font: 600 9.5px var(--ff-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    background: var(--chassis);
+    color: var(--amber);
+    border: 1px solid var(--border-hi);
+  }
+  .agents-results {
+    background: var(--chassis-deep);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+  }
+  .agents-results-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font: 500 11px var(--ff-mono);
+    color: var(--text);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  #agents-results-list { padding: 6px 0; }
+  .agents-result-card {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .agents-result-card:last-child { border-bottom: 0; }
+  .agents-result-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font: 500 11px var(--ff-mono);
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+  .agents-result-meta .prov-badge {
+    padding: 1px 6px;
+    border-radius: 2px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 10px;
+  }
+  .agents-result-meta .prov-badge.anthropic {
+    background: #d4a373;
+    color: #2a1500;
+  }
+  .agents-result-meta .prov-badge.cursor {
+    background: #4ea8de;
+    color: #021a30;
+  }
+  .agents-result-meta .ok-badge {
+    padding: 1px 6px;
+    border-radius: 2px;
+    font-weight: 600;
+    font-size: 10px;
+    background: var(--cat-real_response);
+    color: #0f3000;
+  }
+  .agents-result-meta .ok-badge.fail {
+    background: #d65f5f;
+    color: #ffffff;
+  }
+  .agents-result-prompt {
+    font: 500 11.5px var(--ff-mono);
+    color: var(--text-dim);
+    margin: 4px 0;
+  }
+  .agents-result-body {
+    background: var(--chassis);
+    padding: 8px 12px;
+    border-radius: 2px;
+    font-size: 12px;
+    color: var(--text);
+    white-space: pre-wrap;
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+  }
+  .agents-result-body.error {
+    color: #ff8a8a;
+  }
+
 </style>
 </head>
 <body>
@@ -1781,6 +1940,8 @@ docker compose up -d</pre>
           aria-selected="false" aria-controls="tab-probes">App Probes</button>
   <button class="tab-btn" role="tab" data-tab="profile"
           aria-selected="false" aria-controls="tab-profile">Profile Tests</button>
+  <button class="tab-btn" role="tab" data-tab="agents"
+          aria-selected="false" aria-controls="tab-agents">Agents</button>
   <button class="tab-btn" role="tab" data-tab="config"
           aria-selected="false" aria-controls="tab-config">Config</button>
   <button class="tab-btn" role="tab" data-tab="monitor"
@@ -2014,6 +2175,98 @@ docker compose up -d</pre>
     </section>
 
   </div><!-- /tab-profile -->
+
+  <!-- ============================================================ -->
+  <!-- Tab: Agents                                                  -->
+  <!--   Random-sprinkle coder prompts at Anthropic Claude and       -->
+  <!--   Cursor. The "Fire" loop runs server-side so it survives     -->
+  <!--   page reloads; the UI polls /api/agents/status to render.    -->
+  <!-- ============================================================ -->
+  <div class="tab-panel" id="tab-agents" role="tabpanel"
+       aria-labelledby="tab-agents-btn">
+
+    <section class="panel full" id="agents-panel">
+      <div class="head">
+        <span>Agents</span>
+        <span class="grow"></span>
+        <span id="agents-status-pill" class="pill paused">
+          <span class="dot"></span>
+          <span class="label">STOPPED</span>
+        </span>
+        <span class="mono fade" id="agents-status-meta"
+              style="margin-left: 12px">0 fired</span>
+      </div>
+      <div class="body">
+        <p class="fade" style="margin-top: 0">
+          Random-sprinkle coder prompts at Anthropic Claude and Cursor on
+          a configurable cadence. Fires until you stop. Save API keys
+          for both providers in <a href="#config">Config → Keys</a>
+          first. If the <code>claude</code> CLI binary is on the
+          container's PATH, Anthropic fires use the real subprocess
+          (matched wire shape); otherwise it falls back to the API
+          directly with a <code>claude-cli</code> User-Agent.
+        </p>
+
+        <!-- Controls bar: gap range, providers, start/stop -->
+        <div class="agents-controls">
+          <label class="profile-field">
+            <span class="profile-field-label">Gap (sec)</span>
+            <input type="number" id="agents-min-gap" class="agents-num"
+                   min="5" max="3600" value="60"
+                   title="Minimum seconds between fires">
+            <span class="fade">to</span>
+            <input type="number" id="agents-max-gap" class="agents-num"
+                   min="5" max="3600" value="120"
+                   title="Maximum seconds between fires">
+          </label>
+          <label class="profile-field">
+            <span class="profile-field-label">Providers</span>
+            <label class="agents-cb">
+              <input type="checkbox" id="agents-prov-anthropic" checked>
+              Anthropic
+              <span class="fade mono" id="agents-prov-anthropic-mode">(api)</span>
+            </label>
+            <label class="agents-cb">
+              <input type="checkbox" id="agents-prov-cursor" checked>
+              Cursor <span class="fade mono">(api)</span>
+            </label>
+          </label>
+          <span class="grow"></span>
+          <button id="agents-fire" class="btn primary" type="button">
+            ▶ Fire
+          </button>
+          <button id="agents-stop" class="btn" type="button" hidden>
+            ■ Stop
+          </button>
+        </div>
+
+        <!-- Prompt matrix -->
+        <div class="agents-prompts" id="agents-prompts">
+          <div class="agents-prompts-head">
+            <strong>Prompt matrix</strong>
+            <span class="fade">— check the prompts you want in the rotation</span>
+            <span class="grow"></span>
+            <button class="btn small" id="agents-prompts-all" type="button">All</button>
+            <button class="btn small" id="agents-prompts-none" type="button">None</button>
+          </div>
+          <div class="agents-prompts-grid" id="agents-prompts-grid">
+            <!-- populated by AgentsUI.renderPrompts() -->
+          </div>
+        </div>
+
+        <!-- Live results — most recent fires at top -->
+        <div class="agents-results">
+          <div class="agents-results-head">
+            <strong>Recent fires</strong>
+            <span class="fade" id="agents-results-empty">— nothing yet</span>
+          </div>
+          <div id="agents-results-list">
+            <!-- populated by AgentsUI.renderResults() -->
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
 
   <!-- ============================================================ -->
   <!-- Tab 2: Config                                                -->
@@ -3443,7 +3696,7 @@ window.KeysUI = KeysUI;
 // ================================================================
 
 function initTabs() {
-  const VALID = ["prompt", "probes", "profile", "config", "monitor"];
+  const VALID = ["prompt", "probes", "profile", "agents", "config", "monitor"];
   const DEFAULT_TAB = "prompt";
 
   function activate(name) {
@@ -3903,6 +4156,226 @@ const ProfileUI = (() => {
   return { init };
 })();
 
+// ================================================================
+// Agents tab — random-sprinkle coder prompts at Anthropic & Cursor
+// ================================================================
+//
+// State lives server-side (the run loop is an asyncio.Task in the
+// container). The UI is a thin presentation layer: it loads the
+// catalog once, polls /api/agents/status every 3 seconds while the
+// loop is running, and POSTs start/stop with the current toggle
+// state when the operator clicks the buttons.
+
+const AgentsUI = (() => {
+  let catalog = { prompts: [], providers: [], genres: [],
+                  claude_cli_available: false };
+  let status = { running: false, total_fired: 0, history: [],
+                 enabled_prompts: [], enabled_providers: [],
+                 min_gap_sec: 60, max_gap_sec: 120 };
+  let pollTimer = null;
+
+  // ---- DOM handles ----
+  const $$ = (sel) => document.querySelector(sel);
+
+  // ---- Initial load ----
+  async function init() {
+    try {
+      const r = await fetch("/api/agents/catalog");
+      catalog = await r.json();
+    } catch (e) {
+      console.error("agents catalog load failed:", e);
+      return;
+    }
+    renderPrompts();
+    bind();
+    await refresh();
+    // Always poll, slowly. When the loop is running we'll bump the
+    // cadence in startPolling().
+    pollTimer = setInterval(refresh, 5000);
+    // Show the real CLI availability hint next to the Anthropic
+    // checkbox label so operators know whether they're getting the
+    // subprocess path or the API fallback.
+    const mode = $$("#agents-prov-anthropic-mode");
+    if (mode) {
+      mode.textContent = catalog.claude_cli_available
+        ? "(real CLI)"
+        : "(api)";
+    }
+  }
+
+  function bind() {
+    $$("#agents-fire").addEventListener("click", start);
+    $$("#agents-stop").addEventListener("click", stop);
+    $$("#agents-prompts-all").addEventListener("click", () => setAll(true));
+    $$("#agents-prompts-none").addEventListener("click", () => setAll(false));
+  }
+
+  function setAll(checked) {
+    document.querySelectorAll(".agents-prompt-cb")
+      .forEach(cb => { cb.checked = checked; });
+  }
+
+  function renderPrompts() {
+    const grid = $$("#agents-prompts-grid");
+    grid.innerHTML = "";
+    for (const p of catalog.prompts) {
+      const id = "agents-prompt-" + p.slug;
+      const cb = el("input", {
+        type: "checkbox",
+        id, "data-slug": p.slug,
+        class: "agents-prompt-cb",
+      });
+      cb.checked = true;
+      const label = el("label", { for: id }, p.label);
+      const chip = el("span",
+        { class: "genre-chip", title: "genre: " + p.genre },
+        p.genre);
+      const row = el("div", { class: "agents-prompt-row" },
+        [cb, chip, label]);
+      grid.appendChild(row);
+    }
+  }
+
+  function selectedPrompts() {
+    return Array.from(document.querySelectorAll(".agents-prompt-cb"))
+      .filter(cb => cb.checked)
+      .map(cb => cb.dataset.slug);
+  }
+  function selectedProviders() {
+    const out = [];
+    if ($$("#agents-prov-anthropic").checked) out.push("anthropic");
+    if ($$("#agents-prov-cursor").checked)    out.push("cursor");
+    return out;
+  }
+
+  async function start() {
+    const min_gap = parseInt($$("#agents-min-gap").value, 10) || 60;
+    const max_gap = parseInt($$("#agents-max-gap").value, 10) || 120;
+    if (max_gap < min_gap) {
+      alert("Max gap must be >= min gap.");
+      return;
+    }
+    const prompts = selectedPrompts();
+    const providers = selectedProviders();
+    if (prompts.length === 0) {
+      alert("Pick at least one prompt.");
+      return;
+    }
+    if (providers.length === 0) {
+      alert("Pick at least one provider.");
+      return;
+    }
+
+    $$("#agents-fire").disabled = true;
+    try {
+      const r = await fetch("/api/agents/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          min_gap_sec: min_gap,
+          max_gap_sec: max_gap,
+          prompts,
+          providers,
+        }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ error: "HTTP " + r.status }));
+        alert("Could not start: " + (err.error || JSON.stringify(err)));
+        return;
+      }
+      await refresh();
+    } catch (e) {
+      alert("Start failed: " + e);
+    } finally {
+      $$("#agents-fire").disabled = false;
+    }
+  }
+
+  async function stop() {
+    $$("#agents-stop").disabled = true;
+    try {
+      await fetch("/api/agents/stop", { method: "POST" });
+      await refresh();
+    } finally {
+      $$("#agents-stop").disabled = false;
+    }
+  }
+
+  async function refresh() {
+    try {
+      const r = await fetch("/api/agents/status");
+      status = await r.json();
+    } catch (e) {
+      // Network blip — leave the UI alone.
+      return;
+    }
+    renderStatus();
+    renderResults();
+  }
+
+  function renderStatus() {
+    const pill = $$("#agents-status-pill");
+    const meta = $$("#agents-status-meta");
+    if (status.running) {
+      pill.classList.remove("paused");
+      pill.classList.add("running");
+      pill.querySelector(".label").textContent = "RUNNING";
+    } else {
+      pill.classList.remove("running");
+      pill.classList.add("paused");
+      pill.querySelector(".label").textContent = "STOPPED";
+    }
+    meta.textContent = `${status.total_fired} fired`;
+    $$("#agents-fire").hidden = status.running;
+    $$("#agents-stop").hidden = !status.running;
+  }
+
+  function renderResults() {
+    const list = $$("#agents-results-list");
+    const empty = $$("#agents-results-empty");
+    list.innerHTML = "";
+    const history = (status.history || []).slice().reverse();
+    if (history.length === 0) {
+      empty.style.display = "";
+      return;
+    }
+    empty.style.display = "none";
+    for (const r of history) {
+      list.appendChild(renderResultCard(r));
+    }
+  }
+
+  function renderResultCard(r) {
+    const card = el("div", { class: "agents-result-card" });
+    const provBadge = el("span",
+      { class: "prov-badge " + r.provider }, r.provider);
+    const okBadge = el("span",
+      { class: "ok-badge" + (r.ok ? "" : " fail") },
+      r.ok ? "ok" : "fail");
+    const ts = new Date(r.started_at * 1000)
+      .toLocaleTimeString([], { hour12: false });
+    const meta = el("div", { class: "agents-result-meta" }, [
+      provBadge, okBadge,
+      el("span", {}, r.prompt_label),
+      el("span", { class: "grow" }),
+      el("span", {}, `${r.elapsed_ms}ms · ${r.response_chars} chars · ${ts}`),
+    ]);
+    card.appendChild(meta);
+    if (r.error) {
+      card.appendChild(el("div", { class: "agents-result-prompt" },
+        "error: " + r.error));
+    }
+    if (r.response_text) {
+      card.appendChild(el("div",
+        { class: "agents-result-body" + (r.ok ? "" : " error") },
+        r.response_text));
+    }
+    return card;
+  }
+
+  return { init };
+})();
+
 async function boot() {
   initTabs();
   populateCategoryDropdowns();
@@ -3914,6 +4387,7 @@ async function boot() {
   await KeysUI.init();
   await PromptUI.init();
   await ProfileUI.init();
+  await AgentsUI.init();
   connectStream();
   setInterval(refreshStatus, 2500);
   setInterval(refreshTargets, 10000);

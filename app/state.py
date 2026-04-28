@@ -75,6 +75,14 @@ class AppState:
         self._fa_started_at: float | None = None
         self._fa_cancel: asyncio.Event = asyncio.Event()
 
+        # Agent random-sprinkle loop state. Lives on AppState (not a
+        # local in the endpoint) so the loop survives page reloads.
+        # Late-imported to avoid a top-level circular dep with agents.py
+        # which imports nothing from state.py but is imported by web.py
+        # which imports state.
+        from .agents import AgentLoopState
+        self.agent_loop: AgentLoopState = AgentLoopState()
+
     # ------------------------------------------------------------------
     # Config
     # ------------------------------------------------------------------
