@@ -67,6 +67,13 @@ AI endpoints** so you can:
   Cohere, OpenRouter, HuggingFace, Together, Cerebras, SambaNova,
   Hyperbolic, DeepSeek, xAI, AI21, Fireworks, NVIDIA NIM, GitHub
   Models).
+- **File uploads** in Prompt & Fire. Attach a `.txt` / `.md` / `.csv`
+  / `.json` / `.pdf` / `.docx` / `.xlsx` / source-code file (or any
+  supported text format) and the extracted content rides along in
+  the prompt body. The realistic data-loss vector — "user uploaded
+  a quarterly-results spreadsheet to ChatGPT" — becomes a one-click
+  test against your DLP fabric. Server-side extraction via pypdf,
+  python-docx, openpyxl. 10 MB upload cap, ~20K char extraction cap.
 - **Configurable pacing**: 30–180s random gaps between probes by
   default, plus optional burst mode (3–7 back-to-back requests at
   1–4s intervals) for session-like patterns.
@@ -202,7 +209,13 @@ Five tabs:
 - **Prompt & Fire** — send a real prompt to every keyless (and keyed,
   if you saved keys) AI provider at once. Responses stream back
   inline. This is the fastest way to show a SASE demo audience that
-  AI DLP either is or isn't inspecting the reply body.
+  AI DLP either is or isn't inspecting the reply body. **Attach a
+  file** (text, source code, PDF, DOCX, XLSX) via the 📎 button or
+  by dragging onto the textarea — content is extracted server-side
+  (pypdf for PDFs, python-docx for Word, openpyxl for spreadsheets)
+  and prepended to the prompt as a labeled block, so DLP sees the
+  full document content on the wire. Caps: 10 MB upload, ~20K
+  characters of extracted text per send.
 - **App Probes** — the full 181-entry probe catalog. Filter by name,
   URL, or category; enable/disable individual probes; fire a single
   probe, fire an entire category, or fire every enabled probe once
@@ -358,6 +371,16 @@ Code map:
   gemini, cohere)
 - `app/keys.py` — persistent key store (Docker volume, mode-0600
   JSON, v2 schema with per-provider model cache)
+- `app/extract.py` — file-attachment extraction for the Prompt
+  panel: inline-text formats (.txt, .md, .csv, .json, source code,
+  …) plus PDF/DOCX/XLSX via pypdf/python-docx/openpyxl, capped at
+  ~20K extracted characters per upload
+- `app/pii.py` — synthetic-PII generators (17 categories, locale-
+  aware) for the Profile Tests tab; checksum-valid for cards
+  (Luhn), IBANs (mod-97), and VINs (ISO 3779)
+- `app/mcp.py` — MCP JSON-RPC envelope builders, transport headers,
+  public-server registry; underpins the synthetic + authed MCP
+  probes and the slice-C MCP-payload-shape DLP toggle
 - `app/config.py` — all `.env` knobs and their defaults
 - `app/web.py` — REST + SSE API surface (`/healthz`, `/metrics`,
   `/api/status`, `/api/config`, `/api/targets/…`, `/api/fire-all`,

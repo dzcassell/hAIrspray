@@ -467,6 +467,47 @@
     opacity: 0.4; cursor: not-allowed;
   }
 
+  /* ---------- Attach file chip + drag-and-drop ----------------- */
+  .prompt-attach-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px 4px 10px;
+    margin-top: 8px;
+    background: var(--amber-soft);
+    border: 1px solid var(--amber-deep);
+    border-radius: 12px;
+    font-size: 12px;
+    max-width: 100%;
+  }
+  .prompt-attach-chip[hidden] { display: none; }
+  .prompt-attach-icon { font-size: 13px; }
+  #prompt-attach-name {
+    color: var(--amber-bright);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 320px;
+  }
+  #prompt-attach-meta { font-size: 11px; }
+  /* Tiny ×-style icon button. Distinct from .btn so it sits flush
+     in the chip without competing visually. */
+  .btn-iconish {
+    background: transparent;
+    border: 0;
+    color: var(--text-dim);
+    font-size: 16px; line-height: 1;
+    padding: 0 4px;
+    cursor: pointer;
+  }
+  .btn-iconish:hover {
+    color: var(--amber);
+  }
+  /* Drag-over visual feedback on the textarea. */
+  #prompt-input.drag-active {
+    border-color: var(--amber);
+    box-shadow: 0 0 0 2px var(--amber-soft);
+    background: rgba(255,169,77,.04);
+  }
+
   .prompt-models {
     margin-top: 14px;
     padding: 10px 12px;
@@ -1767,9 +1808,30 @@ docker compose up -d</pre>
                   rows="3"
                   maxlength="4000"
                   placeholder="Write a prompt here. It'll be sent to every checked model below; text replies and image URLs come back inline. Example: Explain TCP congestion control in one paragraph."></textarea>
+
+        <!-- File-attach chip area. Shown only when an attachment is
+             pending. The attached extracted text is stored in JS state
+             (PromptUI.attachment) and sent on next Send. -->
+        <div class="prompt-attach-chip" id="prompt-attach-chip" hidden>
+          <span class="prompt-attach-icon">📎</span>
+          <span class="mono" id="prompt-attach-name"></span>
+          <span class="fade" id="prompt-attach-meta"></span>
+          <button class="btn-iconish" type="button"
+                  id="prompt-attach-remove" title="Remove attachment">×</button>
+        </div>
+
         <div class="prompt-controls">
           <button class="btn" id="prompt-send">Send</button>
           <button class="btn" id="prompt-cancel" hidden>Cancel</button>
+
+          <!-- Attach control. Hidden file input + visible button so we
+               can keep the styling consistent with other .btn elements
+               (a bare <input type=file> looks out of place). -->
+          <input type="file" id="prompt-attach-file" hidden
+                 accept=".txt,.md,.markdown,.csv,.tsv,.json,.log,.xml,.yml,.yaml,.html,.htm,.ini,.conf,.cfg,.toml,.env,.py,.js,.ts,.jsx,.tsx,.sh,.bash,.zsh,.sql,.rb,.go,.rs,.java,.kt,.c,.cc,.cpp,.h,.hpp,.cs,.php,.pl,.lua,.swift,.pdf,.docx,.xlsx">
+          <button class="btn small" id="prompt-attach-btn" type="button"
+                  title="Attach a file (text, PDF, DOCX, XLSX — 10 MB max). Drag-and-drop onto the textarea also works.">📎 Attach</button>
+
           <span class="grow"></span>
           <span class="mono fade" id="prompt-status">—</span>
           <button class="btn small" id="prompt-toggle-models" aria-expanded="true">Hide models</button>
@@ -2644,6 +2706,12 @@ const PromptUI = (() => {
   let catalogue = [];            // [{id, provider, model, kind, label}]
   let checked = new Set();       // ids currently ticked
   let activeAbort = null;        // AbortController for in-flight stream
+  // Attachment state. When the user attaches a file, the server-side
+  // /api/prompt/extract endpoint returns the extracted text; we hold
+  // it here until the next Send fires. Set back to null after Send
+  // (one-shot — same pattern as ChatGPT/Claude.ai). Removing the chip
+  // also clears it.
+  let attachment = null;         // {filename, source_kind, text, summary, char_count, truncated, size_bytes}
 
   const E = {
     input:       () => $("#prompt-input"),
@@ -2658,6 +2726,13 @@ const PromptUI = (() => {
     textBtn:     () => $("#prompt-models-text"),
     imgBtn:      () => $("#prompt-models-image"),
     responses:   () => $("#prompt-responses"),
+    // Attachment UI handles
+    attachBtn:    () => $("#prompt-attach-btn"),
+    attachFile:   () => $("#prompt-attach-file"),
+    attachChip:   () => $("#prompt-attach-chip"),
+    attachName:   () => $("#prompt-attach-name"),
+    attachMeta:   () => $("#prompt-attach-meta"),
+    attachRemove: () => $("#prompt-attach-remove"),
   };
 
   async function loadCatalogue() {
@@ -2856,10 +2931,25 @@ const PromptUI = (() => {
     let seeded = false;
 
     try {
+      const reqBody = {prompt, target_ids: ids};
+      // Include attachment metadata + extracted text if one is
+      // pending. Server-side prompt_stream prepends it to the
+      // outgoing prompt; clearing it here means a second Send
+      // (e.g. user retries with a different question) does not
+      // accidentally re-send the same attachment. Same one-shot
+      // behavior as ChatGPT and Claude.ai.
+      if (attachment) {
+        reqBody.attachment = {
+          filename:    attachment.filename,
+          source_kind: attachment.source_kind,
+          summary:     attachment.summary,
+          text:        attachment.text,
+        };
+      }
       const resp = await fetch("/api/prompt/stream", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({prompt, target_ids: ids}),
+        body: JSON.stringify(reqBody),
         signal: activeAbort.signal,
       });
       if (!resp.ok) {
@@ -2924,6 +3014,12 @@ const PromptUI = (() => {
       E.send().hidden = false;
       E.cancel().hidden = true;
       updateSendEnabled();
+      // Attachments are one-shot — once fired, clear the chip. A
+      // user retrying with a different question shouldn't accidentally
+      // re-include the previous attachment.
+      if (attachment) {
+        clearAttachment();
+      }
     }
   }
 
@@ -2946,6 +3042,110 @@ const PromptUI = (() => {
         if (!E.send().disabled) send();
       }
     });
+
+    // ----- Attachment: button + drag-drop + remove -----
+    E.attachBtn().addEventListener("click", () => E.attachFile().click());
+    E.attachFile().addEventListener("change", (ev) => {
+      const f = ev.target.files && ev.target.files[0];
+      if (f) uploadAttachment(f);
+      // Reset the input so picking the SAME file again retriggers the
+      // change event. Without this, attaching foo.txt, removing it,
+      // then trying to attach foo.txt again does nothing.
+      ev.target.value = "";
+    });
+    E.attachRemove().addEventListener("click", clearAttachment);
+
+    // Drag-and-drop onto the textarea. The textarea already accepts
+    // text drops as text by default — we only intercept when files
+    // are present in the dataTransfer payload.
+    const ta = E.input();
+    const hasFiles = (ev) =>
+      ev.dataTransfer && ev.dataTransfer.types &&
+      Array.prototype.indexOf.call(ev.dataTransfer.types, "Files") !== -1;
+    ta.addEventListener("dragover", (ev) => {
+      if (!hasFiles(ev)) return;
+      ev.preventDefault();
+      ta.classList.add("drag-active");
+    });
+    ta.addEventListener("dragleave", () => ta.classList.remove("drag-active"));
+    ta.addEventListener("drop", (ev) => {
+      if (!hasFiles(ev)) return;
+      ev.preventDefault();
+      ta.classList.remove("drag-active");
+      const f = ev.dataTransfer.files && ev.dataTransfer.files[0];
+      if (f) uploadAttachment(f);
+    });
+  }
+
+  // ----- Attachment helpers -----
+
+  function clearAttachment() {
+    attachment = null;
+    E.attachChip().hidden = true;
+    E.attachName().textContent = "";
+    E.attachMeta().textContent = "";
+  }
+
+  function renderAttachmentChip() {
+    if (!attachment) {
+      clearAttachment();
+      return;
+    }
+    E.attachName().textContent = attachment.filename;
+    E.attachMeta().textContent = "· " + attachment.summary;
+    E.attachChip().hidden = false;
+  }
+
+  async function uploadAttachment(file) {
+    // 10 MB browser-side cap to avoid uploading something we know
+    // the server will reject. The server enforces the same cap.
+    const MAX = 10 * 1024 * 1024;
+    if (file.size > MAX) {
+      alert(`File is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). ` +
+            `Maximum is 10 MB.`);
+      return;
+    }
+    E.attachBtn().disabled = true;
+    E.attachBtn().textContent = "📎 Uploading…";
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await fetch("/api/prompt/extract", {method: "POST", body: fd});
+      if (!r.ok) {
+        let msg = "HTTP " + r.status;
+        try {
+          const j = await r.json();
+          if (j.error) msg = j.error;
+        } catch {}
+        alert("Could not attach file: " + msg);
+        return;
+      }
+      const data = await r.json();
+      // Edge case: text layer was empty (e.g. scanned PDF). The
+      // upload succeeded but there's nothing to send. Inform the
+      // user and don't set the attachment.
+      if (!data.text || !data.text.trim()) {
+        alert(`Nothing to extract from ${data.filename}: ` +
+              (data.summary || "empty content") +
+              ". Try a different file.");
+        return;
+      }
+      attachment = {
+        filename:    data.filename,
+        source_kind: data.source_kind,
+        text:        data.text,
+        char_count:  data.char_count,
+        truncated:   data.truncated,
+        summary:     data.summary,
+        size_bytes:  data.size_bytes,
+      };
+      renderAttachmentChip();
+    } catch (e) {
+      alert("Upload failed: " + e);
+    } finally {
+      E.attachBtn().disabled = false;
+      E.attachBtn().textContent = "📎 Attach";
+    }
   }
 
   return {

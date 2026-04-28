@@ -44,6 +44,7 @@ from .prompt import (
 )
 from .keys import KeyStore
 from . import discovery
+from . import extract
 from . import mcp
 from . import pii
 from .state import AppState
@@ -713,6 +714,97 @@ def create_app(
             )
         return await keys_summary(request)
 
+    async def prompt_extract(request: Request) -> Response:
+        """Accept a multipart upload, extract text, return it inline.
+
+        The client uses this when the user attaches a file in the
+        Prompt panel: upload here, get back the extracted text, then
+        include the text in the next /api/prompt/stream POST as the
+        attachment field. No server-side cache or TTL — the extracted
+        text is held client-side until the user fires the prompt.
+
+        Caps:
+        * 10 MB upload (enforced both browser-side and here).
+        * Extracted text capped at extract.MAX_EXTRACT_CHARS (~20K)
+          inside the extractor itself.
+        """
+        # Starlette uses python-multipart for multipart/form-data
+        # parsing; the import is implicit. Reading the form pulls the
+        # file into memory — fine for our 10 MB cap, would be
+        # insufficient for anything genuinely large but that's exactly
+        # the scope we ruled out.
+        try:
+            form = await request.form()
+        except Exception as e:  # noqa: BLE001 — multipart raises a zoo
+            log.warning("prompt_extract_form_parse_failed", error=str(e))
+            return JSONResponse(
+                {"error": f"could not parse form upload: {e}"},
+                status_code=400,
+            )
+
+        upload = form.get("file")
+        if upload is None or not hasattr(upload, "read"):
+            return JSONResponse(
+                {"error": "missing 'file' field in form upload"},
+                status_code=400,
+            )
+
+        filename = getattr(upload, "filename", "") or ""
+        if not filename:
+            return JSONResponse(
+                {"error": "uploaded file has no filename"},
+                status_code=400,
+            )
+
+        # Read with a hard 10 MB ceiling. Reading one extra byte and
+        # checking is the cleanest way to refuse oversize without
+        # buffering the whole stream first.
+        MAX_UPLOAD = 10 * 1024 * 1024
+        content = await upload.read(MAX_UPLOAD + 1)
+        if len(content) > MAX_UPLOAD:
+            return JSONResponse(
+                {"error": (f"file too large: {len(content):,} bytes "
+                           f"exceeds {MAX_UPLOAD:,} byte cap")},
+                status_code=413,
+            )
+
+        try:
+            result = extract.extract(filename, content)
+        except ValueError as e:
+            # Unsupported extension — clean 422 with the message.
+            return JSONResponse({"error": str(e)}, status_code=422)
+        except Exception as e:  # noqa: BLE001 — pypdf/docx/openpyxl
+            # Library blew up (corrupt file, encrypted, etc.). Tell
+            # the operator what happened — they can pick a different
+            # file. Don't 500 because the upload itself was valid.
+            log.warning(
+                "prompt_extract_library_failed",
+                filename=filename, error=str(e),
+            )
+            return JSONResponse(
+                {"error": f"could not extract from {filename}: "
+                          f"{type(e).__name__}: {e}"},
+                status_code=422,
+            )
+
+        log.info(
+            "prompt_extract_ok",
+            filename=filename,
+            source_kind=result.source_kind,
+            char_count=result.char_count,
+            truncated=result.truncated,
+        )
+
+        return JSONResponse({
+            "filename":    filename,
+            "source_kind": result.source_kind,
+            "text":        result.text,
+            "char_count":  result.char_count,
+            "truncated":   result.truncated,
+            "summary":     result.summary,
+            "size_bytes":  len(content),
+        })
+
     async def prompt_stream(request: Request) -> Response:
         try:
             body = await request.json()
@@ -731,6 +823,54 @@ def create_app(
             return JSONResponse(
                 {"error": "prompt too long (max 4000 chars)"},
                 status_code=400,
+            )
+
+        # Optional attachment block (file-upload feature). The client
+        # extracts the file via /api/prompt/extract, then includes the
+        # extracted text here as a labeled block. We prepend it to the
+        # prompt with a clear "Attached file" header so the model
+        # treats the document as context. Cap on the attachment side
+        # (server-enforced in /extract) is ~20K chars; combined with
+        # the 4K prompt limit we stay well under any provider's
+        # context window.
+        attachment = body.get("attachment")
+        attachment_meta: dict[str, Any] | None = None
+        if attachment is not None:
+            if not isinstance(attachment, dict):
+                return JSONResponse(
+                    {"error": "attachment must be an object"},
+                    status_code=400,
+                )
+            att_text = attachment.get("text")
+            att_name = attachment.get("filename")
+            att_kind = attachment.get("source_kind", "text")
+            att_summary = attachment.get("summary", "")
+            if not isinstance(att_text, str) or not att_text.strip():
+                return JSONResponse(
+                    {"error": "attachment.text must be a non-empty string"},
+                    status_code=400,
+                )
+            if not isinstance(att_name, str) or not att_name.strip():
+                return JSONResponse(
+                    {"error": "attachment.filename must be a non-empty string"},
+                    status_code=400,
+                )
+            # Hard ceiling — defensive even though /extract caps to
+            # ~20K. Anyone hand-crafting a request can't blow past it.
+            if len(att_text) > 25_000:
+                return JSONResponse(
+                    {"error": "attachment.text exceeds 25,000 chars"},
+                    status_code=400,
+                )
+            attachment_meta = {
+                "filename":    att_name,
+                "source_kind": att_kind,
+                "summary":     att_summary,
+            }
+            prompt_text = (
+                f"Attached file: {att_name} ({att_summary})\n\n"
+                f"```\n{att_text}\n```\n\n"
+                f"User question:\n{prompt_text}"
             )
 
         requested_ids = body.get("target_ids")
@@ -762,6 +902,10 @@ def create_app(
             "prompt_run_started",
             prompt_chars=len(prompt_text),
             target_count=len(selected),
+            attachment=(attachment_meta["filename"]
+                        if attachment_meta else None),
+            attachment_kind=(attachment_meta["source_kind"]
+                             if attachment_meta else None),
         )
 
         out_q: asyncio.Queue = asyncio.Queue()
@@ -1145,6 +1289,7 @@ def create_app(
         Route("/api/events", recent_events),
         Route("/api/events/stream", event_stream),
         Route("/api/prompt/targets", prompt_targets),
+        Route("/api/prompt/extract", prompt_extract, methods=["POST"]),
         Route("/api/prompt/stream", prompt_stream, methods=["POST"]),
         Route("/api/profile-tests/catalog", profile_tests_catalog),
         Route("/api/profile-tests/fire", profile_tests_fire, methods=["POST"]),
