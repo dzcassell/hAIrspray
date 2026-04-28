@@ -51,6 +51,7 @@
     --cat-aggregator:     #e6c35a;
     --cat-real_response:  #8fd36a;
     --cat-mcp_synthetic:  #ff8fb1;
+    --cat-mcp_authed:     #d65f8a;
 
     /* fonts */
     --ff-display: "Major Mono Display", "Courier New", monospace;
@@ -911,6 +912,7 @@
   .cat.aggregator    { background: var(--cat-aggregator);    color: #3a2a00; }
   .cat.real_response { background: var(--cat-real_response); color: #0f3000; }
   .cat.mcp_synthetic { background: var(--cat-mcp_synthetic); color: #350014; }
+  .cat.mcp_authed { background: var(--cat-mcp_authed); color: #ffffff; }
 
   /* Config save toast */
   .toast {
@@ -1895,6 +1897,14 @@ docker compose up -d</pre>
               <option value="EU">EU</option>
             </select>
           </label>
+          <label class="profile-field">
+            <span class="profile-field-label">Payload</span>
+            <select id="profile-payload-shape" class="profile-select"
+                    title="Chat sends standard chat-completion bodies. MCP wraps each PII payload inside an MCP tools/call envelope so SASE DLP that parses MCP gets exercised.">
+              <option value="chat" selected>Chat completion</option>
+              <option value="mcp">MCP tools/call</option>
+            </select>
+          </label>
           <span class="grow"></span>
           <button id="profile-fire-all" class="btn primary" type="button">
             ⚡ Fire All Selected
@@ -2104,7 +2114,7 @@ const statusClass = (code) => {
   return "s-" + c;
 };
 
-const ALL_CATEGORIES = ["llm_api","chatbot_ui","media_gen","aggregator","real_response","mcp_synthetic"];
+const ALL_CATEGORIES = ["llm_api","chatbot_ui","media_gen","aggregator","real_response","mcp_synthetic","mcp_authed"];
 
 // ---------- state ----------
 let S = {
@@ -3104,28 +3114,46 @@ const KeysUI = (() => {
       }
     });
 
-    const actions = el("div", {class: "key-actions"},
-                       [saveBtn, refreshBtn, clearBtn]);
+    const isMcp = p.kind === "mcp";
+
+    const actions = isMcp
+      ? el("div", {class: "key-actions"}, [saveBtn, clearBtn])  // no refresh for MCP
+      : el("div", {class: "key-actions"}, [saveBtn, refreshBtn, clearBtn]);
 
     const link = el("a", {
       href: p.signup_url,
       target: "_blank",
       rel: "noopener noreferrer",
-    }, "Get a free key ↗");
+    }, isMcp ? "Get a token ↗" : "Get a free key ↗");
     const metaChildren = [link];
     if (p.present && p.preview) {
       metaChildren.push(document.createTextNode(" · "));
       metaChildren.push(el("span", {class: "key-preview"}, p.preview));
     }
-    // Show discovered model count if we have one.
-    if (p.present && p.model_count > 0) {
-      metaChildren.push(document.createTextNode(" · "));
-      metaChildren.push(el("span", {class: "key-model-count"},
-                            `${p.model_count} models`));
-    } else if (p.present) {
-      metaChildren.push(document.createTextNode(" · "));
-      metaChildren.push(el("span", {class: "key-model-count fade"},
-                            "no catalog yet — click ↻"));
+    if (isMcp) {
+      // For MCP server entries, surface the URL + scope hint right
+      // in the row meta — operators need both to know whether
+      // they've installed it correctly.
+      if (p.url) {
+        metaChildren.push(document.createTextNode(" · "));
+        metaChildren.push(el("span", {class: "key-mcp-url mono fade"}, p.url));
+      }
+      if (p.scope_hint) {
+        metaChildren.push(document.createTextNode(" · "));
+        metaChildren.push(el("span", {class: "key-mcp-scope fade"},
+                              p.scope_hint));
+      }
+    } else {
+      // AI providers: show discovered model count.
+      if (p.present && p.model_count > 0) {
+        metaChildren.push(document.createTextNode(" · "));
+        metaChildren.push(el("span", {class: "key-model-count"},
+                              `${p.model_count} models`));
+      } else if (p.present) {
+        metaChildren.push(document.createTextNode(" · "));
+        metaChildren.push(el("span", {class: "key-model-count fade"},
+                              "no catalog yet — click ↻"));
+      }
     }
 
     const labelDiv = el("div", {class: "key-label"}, [
@@ -3134,7 +3162,8 @@ const KeysUI = (() => {
     ]);
 
     const row = el("div", {
-      class: "key-row" + (p.present ? " present" : ""),
+      class: "key-row" + (p.present ? " present" : "")
+              + (isMcp ? " mcp-row" : ""),
       "data-provider": p.provider,
     }, [labelDiv, inputWrap, actions]);
     return row;
@@ -3470,6 +3499,8 @@ const ProfileUI = (() => {
       return;
     }
     const locale = document.getElementById("profile-locale-select").value;
+    const payload_shape =
+      document.getElementById("profile-payload-shape").value;
 
     // Reset UI.
     const results = document.getElementById("profile-results");
@@ -3488,7 +3519,7 @@ const ProfileUI = (() => {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
-          target_id, categories, prompt_types, locale,
+          target_id, categories, prompt_types, locale, payload_shape,
         }),
         signal: cancelController.signal,
       });

@@ -84,6 +84,12 @@ class KeyStore:
         self._lock = asyncio.Lock()
         self._keys: dict[str, str] = {}
         self._models: dict[str, dict[str, Any]] = {}
+        # Parallel bucket for MCP server tokens (slice B-static). Lives
+        # in the same file under a different top-level key so it
+        # doesn't collide with the AI-provider keys bucket. No model
+        # discovery for MCP servers — what the user authed for is what
+        # they get.
+        self._mcp_keys: dict[str, str] = {}
         self._loaded = False
 
     # ------------------------------------------------------------------
@@ -94,24 +100,27 @@ class KeyStore:
         """Read the keys file from disk. Safe to call repeatedly; a
         successful load clears any in-memory state first."""
         async with self._lock:
-            keys, models = await asyncio.to_thread(self._load_sync)
+            keys, models, mcp_keys = await asyncio.to_thread(self._load_sync)
             self._keys = keys
             self._models = models
+            self._mcp_keys = mcp_keys
             self._loaded = True
 
-    def _load_sync(self) -> tuple[dict[str, str], dict[str, dict[str, Any]]]:
+    def _load_sync(self) -> tuple[
+        dict[str, str], dict[str, dict[str, Any]], dict[str, str],
+    ]:
         if not self._path.exists():
             log.info("no keys file at %s (fresh install)", self._path)
-            return {}, {}
+            return {}, {}, {}
 
         try:
             raw = self._path.read_text(encoding="utf-8")
         except OSError as e:
             log.error("cannot read keys file %s: %s", self._path, e)
-            return {}, {}
+            return {}, {}, {}
 
         if not raw.strip():
-            return {}, {}
+            return {}, {}, {}
 
         try:
             data = json.loads(raw)
@@ -121,11 +130,11 @@ class KeyStore:
                 "fix or delete the file to recover",
                 self._path, e,
             )
-            return {}, {}
+            return {}, {}, {}
 
         if not isinstance(data, dict):
             log.error("keys file root is not an object; ignoring")
-            return {}, {}
+            return {}, {}, {}
 
         # --- keys dict ---
         raw_keys = data.get("keys", {})
@@ -156,7 +165,17 @@ class KeyStore:
                                   else None,
                 }
 
-        return clean_keys, clean_models
+        # --- mcp_keys dict (slice B-static; absent in older files) ---
+        raw_mcp_keys = data.get("mcp_keys", {})
+        clean_mcp_keys: dict[str, str] = {}
+        if isinstance(raw_mcp_keys, dict):
+            for prov, val in raw_mcp_keys.items():
+                if (isinstance(prov, str)
+                        and isinstance(val, str)
+                        and val.strip()):
+                    clean_mcp_keys[prov] = val.strip()
+
+        return clean_keys, clean_models, clean_mcp_keys
 
     async def _save_locked(self) -> None:
         """Persist the in-memory state. Caller must hold ``self._lock``."""
@@ -165,9 +184,10 @@ class KeyStore:
     def _save_sync(self) -> None:
         payload = json.dumps(
             {
-                "version": _SCHEMA_VERSION,
-                "keys":    self._keys,
-                "models":  self._models,
+                "version":  _SCHEMA_VERSION,
+                "keys":     self._keys,
+                "models":   self._models,
+                "mcp_keys": self._mcp_keys,
             },
             indent=2, sort_keys=True,
         ) + "\n"
@@ -295,6 +315,38 @@ class KeyStore:
             await self._save_locked()
 
     # ------------------------------------------------------------------
+    # MCP-server tokens (slice B-static)
+    # ------------------------------------------------------------------
+    # Parallel to the AI-provider get/set/delete above; same persistence
+    # but a different in-memory dict so the two never collide. No
+    # discovery semantics — what the user pastes is what we use.
+
+    async def mcp_has(self, provider: str) -> bool:
+        if not self._loaded:
+            await self.load()
+        return bool(self._mcp_keys.get(provider))
+
+    async def mcp_get(self, provider: str) -> str | None:
+        if not self._loaded:
+            await self.load()
+        return self._mcp_keys.get(provider)
+
+    async def mcp_set(self, provider: str, key: str) -> None:
+        async with self._lock:
+            await self._ensure_loaded_locked()
+            self._mcp_keys[provider] = key.strip()
+            await self._save_locked()
+
+    async def mcp_delete(self, provider: str) -> bool:
+        async with self._lock:
+            await self._ensure_loaded_locked()
+            existed = provider in self._mcp_keys
+            self._mcp_keys.pop(provider, None)
+            if existed:
+                await self._save_locked()
+            return existed
+
+    # ------------------------------------------------------------------
     # Summaries
     # ------------------------------------------------------------------
 
@@ -326,6 +378,24 @@ class KeyStore:
             for prov, entry in self._models.items()
             if entry.get("models")
         }
+
+    async def mcp_summary(self) -> dict[str, Any]:
+        """Non-sensitive summary of stored MCP server tokens.
+
+        Same shape as ``summary()`` but for the parallel mcp_keys
+        bucket. No model-count / fetched-at fields — those are
+        AI-provider concepts that don't apply to MCP servers.
+        """
+        if not self._loaded:
+            await self.load()
+        out: dict[str, dict[str, Any]] = {}
+        for prov, val in self._mcp_keys.items():
+            out[prov] = {
+                "present": True,
+                "preview": _mask(val),
+                "length":  len(val),
+            }
+        return {"providers": out, "path": str(self._path)}
 
 
 def _mask(v: str) -> str:

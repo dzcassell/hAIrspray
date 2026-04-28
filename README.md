@@ -29,7 +29,7 @@ The only way to know whether a given vendor's app-ID actually sees
 what it claims to see is to generate realistic traffic at the real
 services and look at what the fabric reports. hAIrspray is that
 traffic generator. It runs as a container behind your SASE fabric (or
-through your NGFW egress) and fires outbound requests at **178 curated
+through your NGFW egress) and fires outbound requests at **181 curated
 AI endpoints** so you can:
 
 - Verify your vendor's app signatures fire for each AI service you
@@ -44,15 +44,17 @@ AI endpoints** so you can:
 
 ## What actually goes out the wire
 
-- **178 probes across 6 categories**: LLM APIs (OpenAI, Anthropic,
+- **181 probes across 7 categories**: LLM APIs (OpenAI, Anthropic,
   Gemini, Groq, Mistral, Cohere, and ~16 more), chatbot UIs (ChatGPT,
   Claude.ai, Gemini Web, Copilot, Character.AI, and ~27 more), media
   generation (Midjourney, Leonardo, Runway, Suno, ElevenLabs, and ~44
   more), aggregators (HuggingFace, Replicate, OpenRouter, Cursor,
   Lovable, and ~50 more), MCP synthetic traffic (JSON-RPC payloads
   to reflectors and known public MCP server hostnames — both legacy
-  HTTP+SSE and current Streamable HTTP transports), and a small
-  "real response" set.
+  HTTP+SSE and current Streamable HTTP transports), authed MCP traffic
+  (real handshakes against GitHub MCP, Notion MCP, and Linear MCP
+  when you've saved a token in Config → Keys), and a small "real
+  response" set.
 - **Realistic request shapes.** LLM-API probes use SDK-style
   User-Agents (`OpenAI/Python 1.51.0`, `anthropic-python/0.39.0`) and
   the right endpoints, bodies, and auth headers. Chatbot-UI probes
@@ -195,24 +197,33 @@ expected lifecycle.
 
 ## The UI
 
-Four tabs:
+Five tabs:
 
 - **Prompt & Fire** — send a real prompt to every keyless (and keyed,
   if you saved keys) AI provider at once. Responses stream back
   inline. This is the fastest way to show a SASE demo audience that
   AI DLP either is or isn't inspecting the reply body.
-- **App Probes** — the full 178-entry probe catalog. Filter by name,
+- **App Probes** — the full 181-entry probe catalog. Filter by name,
   URL, or category; enable/disable individual probes; fire a single
   probe, fire an entire category, or fire every enabled probe once
   (concurrency-capped) via **⚡ Fire All**.
+- **Profile Tests** — synthetic-PII DLP testing. Pick a model + locale
+  + payload shape, tick categories of PII to test (Address, Phone,
+  SSN, IBAN, Credit Card, Passport, MRN, etc. — 17 categories), fire
+  individually or in bulk, and see which payloads were blocked,
+  partially redacted, or echoed verbatim. The **Payload** dropdown
+  switches between standard chat-completion bodies and MCP
+  `tools/call` envelopes — the latter tests whether your DLP engine
+  actually parses MCP payloads or treats them as opaque JSON.
 - **Config** — scheduler knobs (min/max interval, burst probability,
-  burst size, burst gap, category toggles) and the persistent API
-  key store for the 16 keyed providers (Groq, Mistral, Google
-  Gemini, Cohere, OpenRouter, HuggingFace, Together, Cerebras,
-  SambaNova, Hyperbolic, DeepSeek, xAI, AI21, Fireworks, NVIDIA NIM,
-  GitHub Models). **Dynamic model discovery**: when you save a key,
-  hAIrspray calls the provider's `/v1/models` endpoint with it and
-  caches whatever catalog that key unlocks, so the Prompt grid always
+  burst size, burst gap, category toggles) and the persistent key
+  store. Sixteen keyed AI providers (Groq, Mistral, Gemini, Cohere,
+  OpenRouter, HuggingFace, Together, Cerebras, SambaNova, Hyperbolic,
+  DeepSeek, xAI, AI21, Fireworks, NVIDIA NIM, GitHub Models) plus
+  three keyed MCP servers (GitHub MCP, Notion MCP, Linear MCP).
+  **Dynamic model discovery**: when you save an AI key, hAIrspray
+  calls the provider's `/v1/models` endpoint with it and caches
+  whatever catalog that key unlocks, so the Prompt grid always
   renders models your key actually has access to. A **↻** button per
   row re-runs discovery when a vendor churns their catalog.
 - **Monitor** — live stats (totals, per-category bars, OK vs error
@@ -340,7 +351,7 @@ and in your SASE's logs at the same layer.
 
 Code map:
 
-- `app/registry.py` — the 178-probe catalog
+- `app/registry.py` — the 181-probe catalog
 - `app/prompt.py` — the 12 keyless + 16 keyed prompt-capable providers
 - `app/discovery.py` — per-provider `/v1/models` fetchers that power
   dynamic model discovery (three request shapes: openai-compatible,

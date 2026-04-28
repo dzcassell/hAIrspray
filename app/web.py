@@ -44,6 +44,7 @@ from .prompt import (
 )
 from .keys import KeyStore
 from . import discovery
+from . import mcp
 from . import pii
 from .state import AppState
 
@@ -124,11 +125,20 @@ def _config_to_dict(cfg) -> dict:
     }
 
 
-def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
+def create_app(
+    state: AppState,
+    client: httpx.AsyncClient,
+    key_store: KeyStore | None = None,
+) -> Starlette:
 
-    # Shared key store. Lazily loads on first access; file lives in the
-    # Docker volume mounted at /data (configurable via AI_SPRAY_KEYS_PATH).
-    key_store = KeyStore()
+    # Shared key store. If the caller provided one (so the same
+    # instance is also passed to build_registry for MCPAuthedProbe),
+    # use that — a single KeyStore avoids cache coherence issues.
+    # Otherwise lazily construct one; lazily loads on first access;
+    # file lives in the Docker volume mounted at /data (configurable
+    # via AI_SPRAY_KEYS_PATH).
+    if key_store is None:
+        key_store = KeyStore()
 
     # ------------------ UI ------------------
 
@@ -488,6 +498,14 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
         for p in KEYED_PROVIDERS:
             if p["provider"] == provider:
                 return p
+        # Slice B-static: MCP keyed servers share the key store with
+        # the AI providers but use a different entry shape (no shape/
+        # base_url/extra/models — just url/transport/auth_*). The
+        # discovery path skips them; the keys_summary endpoint
+        # includes them with model_count omitted.
+        for s in mcp.MCP_KEYED_SERVERS:
+            if s["provider"] == provider:
+                return {**s, "_mcp": True}
         return None
 
     async def _run_discovery_for(provider: str) -> tuple[bool, int, str | None]:
@@ -503,6 +521,12 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
         entry = _provider_entry(provider)
         if entry is None:
             return False, 0, f"unknown provider: {provider}"
+        # MCP keyed servers don't expose a /v1/models endpoint —
+        # there's no catalog to discover, just one fixed initialize
+        # endpoint. Treat refresh as a no-op so the Refresh button
+        # still works (returns success, 0 models, no error).
+        if entry.get("_mcp"):
+            return True, 0, None
         api_key = await key_store.get(provider)
         if not api_key:
             return False, 0, "no key stored for this provider"
@@ -534,33 +558,50 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
 
     async def keys_summary(request: Request) -> Response:
         summary = await key_store.summary()
-        return JSONResponse({
-            "providers": [
-                {
-                    "provider":    p["provider"],
-                    "label":       p["label"],
-                    "signup_url":  p["signup_url"],
-                    "present":     bool(summary["providers"]
-                                        .get(p["provider"], {})
-                                        .get("present")),
-                    "preview":     (summary["providers"]
+        mcp_summary = await key_store.mcp_summary()
+        providers = [
+            {
+                "provider":    p["provider"],
+                "label":       p["label"],
+                "signup_url":  p["signup_url"],
+                "kind":        "ai",
+                "present":     bool(summary["providers"]
                                     .get(p["provider"], {})
-                                    .get("preview")),
-                    "model_count": (summary["providers"]
-                                    .get(p["provider"], {})
-                                    .get("model_count", 0)),
-                    "fetched_at":  (summary["providers"]
-                                    .get(p["provider"], {})
-                                    .get("fetched_at")),
-                }
-                for p in KEYED_PROVIDERS
-            ],
-            "path": summary["path"],
-        })
+                                    .get("present")),
+                "preview":     (summary["providers"]
+                                .get(p["provider"], {})
+                                .get("preview")),
+                "model_count": (summary["providers"]
+                                .get(p["provider"], {})
+                                .get("model_count", 0)),
+                "fetched_at":  (summary["providers"]
+                                .get(p["provider"], {})
+                                .get("fetched_at")),
+            }
+            for p in KEYED_PROVIDERS
+        ]
+        # Slice B-static: append MCP keyed servers. They share the key
+        # store *file* but are persisted in a parallel mcp_keys bucket
+        # (different in-memory dict, no model-discovery semantics). The
+        # presence/preview comes from mcp_summary(), not summary().
+        for s in mcp.MCP_KEYED_SERVERS:
+            mcp_entry = mcp_summary["providers"].get(s["provider"], {})
+            providers.append({
+                "provider":   s["provider"],
+                "label":      s["label"],
+                "signup_url": s["signup_url"],
+                "kind":       "mcp",
+                "url":        s["url"],
+                "scope_hint": s["scope_hint"],
+                "present":    bool(mcp_entry.get("present")),
+                "preview":    mcp_entry.get("preview"),
+            })
+        return JSONResponse({"providers": providers, "path": summary["path"]})
 
     async def keys_set(request: Request) -> Response:
         provider = request.path_params["provider"]
-        if _provider_entry(provider) is None:
+        is_mcp = mcp.mcp_keyed_entry(provider) is not None
+        if not is_mcp and _provider_entry(provider) is None:
             return JSONResponse(
                 {"error": f"unknown provider: {provider}"},
                 status_code=400,
@@ -575,6 +616,22 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
                 {"error": "key must be a non-empty string"},
                 status_code=400,
             )
+
+        # MCP servers: token-only, no model catalog to discover.
+        if is_mcp:
+            try:
+                await key_store.mcp_set(provider, key)
+            except OSError as e:
+                log.error("key_store_write_failed", error=str(e))
+                return JSONResponse(
+                    {"error": f"could not save key: {e}"},
+                    status_code=500,
+                )
+            log.info("mcp_key_set", provider=provider)
+            summary_resp = await keys_summary(request)
+            return summary_resp
+
+        # AI providers: existing flow with discovery.
         try:
             await key_store.set(provider, key)
         except OSError as e:
@@ -637,13 +694,17 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
 
     async def keys_delete(request: Request) -> Response:
         provider = request.path_params["provider"]
-        if _provider_entry(provider) is None:
+        is_mcp = mcp.mcp_keyed_entry(provider) is not None
+        if not is_mcp and _provider_entry(provider) is None:
             return JSONResponse(
                 {"error": f"unknown provider: {provider}"},
                 status_code=400,
             )
         try:
-            await key_store.delete(provider)
+            if is_mcp:
+                await key_store.mcp_delete(provider)
+            else:
+                await key_store.delete(provider)
         except OSError as e:
             log.error("key_store_write_failed", error=str(e))
             return JSONResponse(
@@ -918,12 +979,45 @@ def create_app(state: AppState, client: httpx.AsyncClient) -> Starlette:
                 {"error": f"unknown locale: {locale}"}, status_code=400,
             )
 
+        # Slice C: payload_shape selects how synthetic PII is wrapped
+        # for the outbound request. "chat" (default) sends a regular
+        # chat-completion prompt — what every existing Profile Test
+        # run does. "mcp" wraps the same PII inside an MCP tools/call
+        # envelope so SASE DLP engines that parse MCP get exercised.
+        # The actual destination is still the user-selected AI model,
+        # so this tests *payload-shape* DLP coverage rather than full
+        # MCP-server-aware DLP. (For testing against a real MCP
+        # server, the future B-oauth slice will add that path.)
+        payload_shape = body.get("payload_shape", "chat")
+        if payload_shape not in ("chat", "mcp"):
+            return JSONResponse(
+                {"error": "payload_shape must be 'chat' or 'mcp'"},
+                status_code=400,
+            )
+
         # Build the full test matrix up front.
         matrix: list[tuple[str, str, dict[str, Any], str]] = []
         for cat in categories:
             for ptype in prompt_types:
                 generated = pii.generate(cat, locale)
                 prompt_text = pii.build_prompt(generated, ptype)
+                if payload_shape == "mcp":
+                    # Wrap the generated PII inside an MCP tools/call
+                    # envelope. The model receives the JSON-RPC body
+                    # as raw text — most chat completion APIs will
+                    # echo or summarize it; what we care about is
+                    # that DLP en route saw an MCP-shaped payload.
+                    import json as _json
+                    mcp_envelope = mcp.wrap_pii_as_mcp_tool_call(
+                        pii_value=generated["value"],
+                        pii_label=generated["label"],
+                        prompt_text=prompt_text,
+                    )
+                    prompt_text = (
+                        "Below is an MCP JSON-RPC tool call. Please "
+                        "process the request as instructed:\n\n"
+                        + _json.dumps(mcp_envelope, indent=2)
+                    )
                 matrix.append((cat, ptype, generated, prompt_text))
 
         log.info(

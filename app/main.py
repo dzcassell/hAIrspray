@@ -238,7 +238,13 @@ async def _main_async() -> int:
 
     # Build the full target catalogue; per-category filtering happens
     # at scheduling time so the UI can toggle categories live.
-    providers = build_registry()
+    # KeyStore is constructed once and shared between the registry
+    # (so MCPAuthedProbe can fetch tokens lazily) and the web app
+    # (where the /api/keys endpoints write to it). One instance, no
+    # cache coherence headaches.
+    from .keys import KeyStore
+    key_store = KeyStore()
+    providers = build_registry(key_store=key_store)
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -285,7 +291,7 @@ async def _main_async() -> int:
     ) as client:
 
         state = AppState(initial_config=cfg, providers=providers)
-        app = create_app(state, client)
+        app = create_app(state, client, key_store=key_store)
 
         uvi_config = uvicorn.Config(
             app,

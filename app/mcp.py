@@ -361,3 +361,128 @@ REFLECTOR_TARGETS: list[dict[str, str]] = [
         "url": "https://postman-echo.com/post",
     },
 ]
+
+
+# ---------------------------------------------------------------------------
+# Keyed MCP servers (slice B-static)
+# ---------------------------------------------------------------------------
+#
+# Three public MCP servers accept simple token auth — no OAuth, no
+# refresh tokens, no callback URL registration. Each entry uses the
+# same shape as KEYED_PROVIDERS in prompt.py so the existing key-store
+# machinery handles save/refresh/delete unchanged. The Config → Keys
+# panel renders them automatically alongside the AI providers.
+#
+# OAuth-only MCP servers (Atlassian, Asana, Sentry, Cloudflare's
+# hosted MCPs, Stripe's MCP) are deliberately out of scope here —
+# they require a callback handler and refresh-token rotation that
+# would be a substantial separate feature. They appear unauth in
+# slice A's mcp_synthetic probes, so SASE still sees the
+# destination + payload combination.
+
+MCP_KEYED_SERVERS: list[dict[str, Any]] = [
+    {
+        "provider":   "github_mcp",
+        "label":      "GitHub MCP",
+        "signup_url": "https://github.com/settings/tokens/new?scopes=repo,read:user",
+        # GitHub MCP uses the same Authorization: Bearer <PAT> as the
+        # GitHub Models endpoint. Standard PAT with at least repo and
+        # read:user scopes works.
+        "url":            "https://api.githubcopilot.com/mcp",
+        "transport":      "streamable",
+        "auth_header":    "Authorization",
+        "auth_format":    "Bearer {key}",
+        "user_agent":     "github-mcp-client/1.0.0",
+        "scope_hint":     "PAT with repo + read:user scopes",
+    },
+    {
+        "provider":   "notion_mcp",
+        "label":      "Notion MCP",
+        "signup_url": "https://www.notion.so/profile/integrations",
+        # Notion MCP accepts the integration token (secret_xxx) as a
+        # Bearer credential.
+        "url":            "https://mcp.notion.com/mcp",
+        "transport":      "streamable",
+        "auth_header":    "Authorization",
+        "auth_format":    "Bearer {key}",
+        "user_agent":     "notion-mcp-client/1.0.0",
+        "scope_hint":     "Internal integration token, any workspace",
+    },
+    {
+        "provider":   "linear_mcp",
+        "label":      "Linear MCP",
+        "signup_url": "https://linear.app/settings/api",
+        # Linear personal API key uses Authorization: <key> directly,
+        # NO 'Bearer' prefix. This is a Linear-specific quirk that
+        # tripped me up while testing.
+        "url":            "https://mcp.linear.app/mcp",
+        "transport":      "streamable",
+        "auth_header":    "Authorization",
+        "auth_format":    "{key}",
+        "user_agent":     "linear-mcp-client/1.0.0",
+        "scope_hint":     "Personal API key with read+write access",
+    },
+]
+
+
+def mcp_keyed_entry(provider: str) -> dict[str, Any] | None:
+    """Look up an MCP_KEYED_SERVERS entry by its provider slug."""
+    for s in MCP_KEYED_SERVERS:
+        if s["provider"] == provider:
+            return s
+    return None
+
+
+def build_authed_probe_body() -> dict[str, Any]:
+    """The body sent to authed MCP servers in slice B-static.
+
+    Same as slice A — initialize is the universal first message, most
+    classifiable. Once we have a real session token we *could* go
+    further (tools/list to enumerate the server's actual tool surface),
+    but for SASE-classification testing the initialize is the
+    important wire shape.
+    """
+    return build_initialize_request()
+
+
+def headers_for_keyed(server: dict[str, Any], api_key: str) -> dict[str, str]:
+    """Headers for an authed MCP server probe — transport headers
+    plus the server-specific auth header."""
+    h = dict(headers_for(server["transport"]))
+    h["User-Agent"] = server["user_agent"]
+    h[server["auth_header"]] = server["auth_format"].format(key=api_key)
+    return h
+
+
+# ---------------------------------------------------------------------------
+# DLP test payload wrapping (slice C)
+# ---------------------------------------------------------------------------
+#
+# The Profile Tests tab will pass payload_shape="mcp" to wrap synthetic
+# PII inside an MCP tools/call envelope instead of a chat completion.
+# The DLP question being tested: does your DLP engine *parse* MCP and
+# inspect the tools/call.params.arguments, or treat the whole body as
+# opaque JSON?
+
+def wrap_pii_as_mcp_tool_call(
+    pii_value: str,
+    pii_label: str,
+    prompt_text: str,
+) -> dict[str, Any]:
+    """Build an MCP tools/call body that embeds PII in the arguments.
+
+    The shape is realistic — a generic 'submit_form' tool with named
+    fields, exactly the kind of thing a real MCP-using assistant might
+    call when helping a user with a form. The PII goes into the
+    arguments dict where a properly-implemented DLP MCP parser
+    *should* see it.
+    """
+    return build_tools_call_request(
+        tool_name="submit_form",
+        arguments={
+            "field_label": pii_label,
+            "field_value": pii_value,
+            "context": prompt_text,
+            "submitted_by": "hairspray-profile-test",
+        },
+    )

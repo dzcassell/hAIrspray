@@ -22,6 +22,7 @@ from . import mcp
 from .providers import (
     ApiProbe,
     DuckDuckGoChat,
+    MCPAuthedProbe,
     PollinationsImage,
     PollinationsText,
     Provider,
@@ -587,12 +588,24 @@ def _mcp_synthetic_probes() -> list[Provider]:
     return probes
 
 
-def build_registry(categories: set[str] | None = None) -> list[Provider]:
+def build_registry(
+    categories: set[str] | None = None,
+    key_store: Any | None = None,
+) -> list[Provider]:
     """Return the flat list of providers.
 
     With ``categories=None`` (the default used at runtime), every provider
     is returned so the live UI can re-enable a category at any time. Pass
     an explicit ``categories`` set to pre-filter (useful for tests).
+
+    ``key_store``: if provided, MCPAuthedProbe instances are constructed
+    for each entry in mcp.MCP_KEYED_SERVERS — these are slice B-static,
+    real authed traffic against MCP servers that accept token auth.
+    Without a key_store the authed probes are omitted (so test code
+    that only cares about the deterministic registry shape doesn't
+    have to wire one up). The probes themselves fetch the saved token
+    at execute() time, so saving/refreshing/deleting a key takes
+    effect on the next fire without registry rebuild.
     """
     all_providers: list[Provider] = []
     all_providers += _llm_api_probes()
@@ -601,6 +614,11 @@ def build_registry(categories: set[str] | None = None) -> list[Provider]:
     all_providers += _aggregator_targets()
     all_providers += _real_response_providers()
     all_providers += _mcp_synthetic_probes()
+    if key_store is not None:
+        for server in mcp.MCP_KEYED_SERVERS:
+            all_providers.append(
+                MCPAuthedProbe(server=server, key_provider=key_store.mcp_get)
+            )
     if categories is None:
         return all_providers
     return [p for p in all_providers if p.category in categories]

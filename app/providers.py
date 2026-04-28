@@ -368,3 +368,78 @@ class DuckDuckGoChat(Provider):
                 ok=False,
                 error=f"chat post failed: {type(e).__name__}: {e}",
             )
+
+# ---------------------------------------------------------------------------
+# MCPAuthedProbe — slice B-static
+# ---------------------------------------------------------------------------
+#
+# Fires an authenticated MCP initialize POST against a real public MCP
+# server. The API key is fetched from the KeyStore at execute() time
+# (not constructor time) so we don't have to rebuild the registry
+# every time a user saves/refreshes a key — the same probe instance
+# transparently goes from "no key, returns error" to "key saved,
+# fires real authed traffic" without any state mutation on the probe
+# itself.
+#
+# Bodies and headers come from the mcp module so this class stays
+# thin: it's just the bridge between the registry and the key store.
+
+class MCPAuthedProbe(Provider):
+    """Authed MCP server probe — see MCP_KEYED_SERVERS in app/mcp.py."""
+
+    def __init__(self, server: dict[str, Any], key_provider: Callable[[str], Any]):
+        # `server` is one MCP_KEYED_SERVERS entry.
+        # `key_provider` is an async callable that returns the stored
+        # API key for a provider slug, or None if not saved yet.
+        # In production it's KeyStore.get; in tests it's whatever the
+        # test wires up.
+        self._server = server
+        self._key_provider = key_provider
+        self.name = f"{server['label']} (authed)"
+        self.url = server["url"]
+        self.category = "mcp_authed"
+
+    async def execute(self, client: httpx.AsyncClient) -> ProviderResult:
+        # Late import — providers.py is imported very early (before
+        # the app package is fully loaded) and importing app.mcp at
+        # module load time would create a cycle on some startup paths.
+        from . import mcp as _mcp
+
+        api_key = await self._key_provider(self._server["provider"])
+        if not api_key:
+            # No key saved → return a clear, non-network error so
+            # the operator sees exactly what's missing in the UI.
+            return ProviderResult(
+                name=self.name,
+                category=self.category,
+                method="POST",
+                url=self.url,
+                status_code=None,
+                ok=False,
+                error=f"no API key saved for {self._server['provider']} "
+                      f"(see {self._server['signup_url']})",
+            )
+
+        headers = _mcp.headers_for_keyed(self._server, api_key)
+        body = _mcp.build_authed_probe_body()
+
+        try:
+            r = await client.post(self.url, headers=headers, json=body)
+            return ProviderResult(
+                name=self.name,
+                category=self.category,
+                method="POST",
+                url=str(r.url),
+                status_code=r.status_code,
+                ok=True,  # any non-transport response is "fabric saw it"
+            )
+        except httpx.HTTPError as e:
+            return ProviderResult(
+                name=self.name,
+                category=self.category,
+                method="POST",
+                url=self.url,
+                status_code=None,
+                ok=False,
+                error=f"{type(e).__name__}: {e}",
+            )
